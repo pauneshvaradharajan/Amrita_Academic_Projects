@@ -36,7 +36,7 @@ def make_demo_data(seed: int = 42) -> pd.DataFrame:
             "participant_id": participant,
             "session_id": f"D{i + 1:03d}",
             "session_number": session_number,
-            "timestamp": pd.Timestamp("2026-01-01") + pd.Timedelta(days=i),
+            "timestamp": pd.Timestamp("2026-01-01") + pd.Timedelta(days=int(i)),
             "game": "Fictional Demo Game",
             "difficulty": ["Easy", "Medium", "Hard"][i % 3],
             "predicted_engagement": label,
@@ -281,13 +281,13 @@ with tab_overview:
         fig = px.bar(counts, x="Engagement", y="Sessions", color="Engagement", color_discrete_map=COLORS,
                      title="Predicted engagement classes")
         fig.update_layout(showlegend=False, margin=dict(l=10, r=10, t=50, b=10))
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
     with right:
         if "timestamp" in data and data["timestamp"].notna().any():
             by_day = data.dropna(subset=["timestamp"]).assign(Date=lambda x: x["timestamp"].dt.date.astype(str)).groupby(["Date", "predicted_engagement"]).size().reset_index(name="Sessions")
             fig = px.line(by_day, x="Date", y="Sessions", color="predicted_engagement", markers=True,
                           color_discrete_map=COLORS, title="Predictions over time")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
         else:
             st.caption("Add a timestamp column to show a time trend.")
     st.subheader("What this summary means")
@@ -318,7 +318,7 @@ with tab_agent:
 with tab_data:
     st.subheader("Session prediction records")
     visible_cols = [c for c in ["participant_id", "session_id", "session_number", "timestamp", "game", "difficulty", "predicted_engagement", "confidence"] if c in data.columns]
-    st.dataframe(data[visible_cols], use_container_width=True, hide_index=True)
+    st.dataframe(data[visible_cols], width="stretch", hide_index=True)
     report = create_report(data, summary)
     st.download_button("Download summary report", report, file_name="multipeng_engagement_summary.md", mime="text/markdown")
     template = pd.DataFrame(columns=["participant_id", "session_id", "predicted_engagement", "confidence", "timestamp", "game", "difficulty"])
