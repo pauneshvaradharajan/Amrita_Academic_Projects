@@ -153,7 +153,12 @@ def run_analysis_tool(tool_name: str, df: pd.DataFrame) -> dict:
         counts = df.groupby(["participant_id", "predicted_engagement"]).size().unstack(fill_value=0)
         counts = counts.reindex(columns=CLASSES, fill_value=0)
         counts["sessions"] = counts.sum(axis=1)
-        return {"tool": tool_name, "top_rows": counts.sort_values("sessions", ascending=False).head(10).reset_index().to_dict("records")}
+        return {
+            "tool": tool_name,
+            "participants": int(len(counts)),
+            "class_session_totals": {name: int(counts[name].sum()) for name in CLASSES},
+            "note": "Participant identifiers and individual rows are excluded from the language-model context.",
+        }
     if tool_name == "time_trend" and "timestamp" in df and df["timestamp"].notna().any():
         dated = df.dropna(subset=["timestamp"]).copy()
         dated["date"] = dated["timestamp"].dt.date.astype(str)
@@ -176,13 +181,13 @@ def choose_tools(question: str, df: pd.DataFrame) -> list[str]:
     return list(dict.fromkeys(tools))
 
 
-def deterministic_answer(question: str, results: list[dict], context: list[tuple[str, float]]) -> str:
-    summary = summarize_data(st.session_state.dataset)
+def deterministic_answer(question: str, results: list[dict], context: list[tuple[str, float]], df: pd.DataFrame) -> str:
+    summary = summarize_data(df)
     distribution = ", ".join(f"{k}: {summary['class_counts'][k]} ({summary['class_percent'][k]}%)" for k in CLASSES)
     pieces = [f"I analyzed {summary['sessions']} sessions from {summary['participants']} participants. Predicted classes: {distribution}."]
     for result in results:
-        if result["tool"] == "participant_summary" and result.get("top_rows"):
-            pieces.append("Participant-level counts are available in the analysis panel; this summary does not rank who is more engaged overall.")
+        if result["tool"] == "participant_summary":
+            pieces.append("The participant analysis uses anonymous totals and does not expose individual identities.")
         if result["tool"] == "time_trend":
             pieces.append("A date-based count table was prepared from rows with valid timestamps.")
     if context:
@@ -191,10 +196,22 @@ def deterministic_answer(question: str, results: list[dict], context: list[tuple
     return " ".join(pieces)
 
 
-def llm_answer(question: str, results: list[dict], context: list[tuple[str, float]]) -> tuple[str, str]:
+def sanitize_question(question: str, df: pd.DataFrame) -> str:
+    safe_question = question
+    for column in ["participant_id", "session_id"]:
+        if column in df:
+            for identifier in df[column].dropna().astype(str).unique():
+                if identifier and identifier.lower() != "unknown":
+                    safe_question = re.sub(rf"(?<!\w){re.escape(identifier)}(?!\w)", "[record]", safe_question, flags=re.IGNORECASE)
+    return safe_question
+
+
+def llm_answer(question: str, results: list[dict], context: list[tuple[str, float]], df: pd.DataFrame, allow_llm: bool) -> tuple[str, str]:
     api_key = st.secrets.get("GEMINI_API_KEY", os.getenv("GEMINI_API_KEY", ""))
+    if not allow_llm:
+        return deterministic_answer(question, results, context, df), "Gemini is off; no user question or uploaded data was sent to an external LLM."
     if not api_key:
-        return deterministic_answer(question, results, context), "No GEMINI_API_KEY is configured; showing the data-grounded explanation without an LLM."
+        return deterministic_answer(question, results, context, df), "No GEMINI_API_KEY is configured; showing the data-grounded explanation without an LLM."
     try:
         from google import genai
         from google.genai import types
@@ -207,9 +224,9 @@ Answer the user's question in plain English. Use only the computed result JSON a
 Do not claim causation, clinical status, or that predictions are ground truth. If information is absent, say so.
 For background claims, cite source headings exactly as [Source 1], etc. Clearly distinguish predicted classes from true labels.
 
-User question: {question}
+User question: {sanitize_question(question, df)}
 
-Computed tool results (authoritative for counts and metrics):
+Computed aggregate results (authoritative for counts; contains no session rows or identifiers):
 {payload}
 
 Retrieved project notes:
@@ -223,16 +240,16 @@ Retrieved project notes:
         answer = (response.text or "").strip()
         if not answer:
             raise RuntimeError("The language model returned an empty answer.")
-        return answer, "Gemini generated this explanation from computed results and retrieved project notes."
+        return answer, "Gemini generated this explanation from aggregate results and retrieved project notes."
     except Exception as exc:
-        return deterministic_answer(question, results, context), f"LLM unavailable ({type(exc).__name__}); used the data-grounded fallback."
+        return deterministic_answer(question, results, context, df), f"LLM unavailable ({type(exc).__name__}); used the data-grounded fallback."
 
 
-def run_agent(question: str, df: pd.DataFrame) -> tuple[str, list[str], list[tuple[str, float]], str]:
+def run_agent(question: str, df: pd.DataFrame, allow_llm: bool) -> tuple[str, list[str], list[tuple[str, float]], str]:
     selected = choose_tools(question, df)
     results = [run_analysis_tool(name, df) for name in selected]
     context = retrieve_context(question)
-    answer, status = llm_answer(question, results, context)
+    answer, status = llm_answer(question, results, context, df, allow_llm)
     return answer, selected, context, status
 
 
@@ -296,9 +313,14 @@ with tab_overview:
 with tab_agent:
     st.subheader("Ask a question about these sessions")
     question = st.text_input("Question", placeholder="Example: Summarize the engagement distribution and explain the limitations")
+    allow_llm = st.checkbox(
+        "Allow Gemini to receive my question and aggregate results",
+        value=False,
+        help="When enabled, the app sends the question, aggregate counts, and retrieved project notes to Google Gemini. It does not send session rows, participant IDs, or raw sensor features.",
+    )
     if st.button("Analyze", type="primary", disabled=not question.strip()):
         with st.spinner("The agent is analyzing the data and searching project notes..."):
-            answer, tools_used, sources, llm_status = run_agent(question, data)
+            answer, tools_used, sources, llm_status = run_agent(question, data, allow_llm)
         st.session_state["last_agent"] = {"question": question, "answer": answer, "tools": tools_used,
                                            "sources": sources, "status": llm_status}
     result = st.session_state.get("last_agent")
@@ -327,4 +349,3 @@ with tab_data:
 
 st.divider()
 st.caption("Research decision support only · predictions can be wrong · do not use for clinical or high-impact decisions.")
-
