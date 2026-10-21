@@ -1,0 +1,9 @@
+.streamlit/secrets.toml
+*.db
+*.sqlite
+*.sqlite3
+__pycache__/
+.venv/
+*.csv
+!phase1_prediction_template.csv
+
