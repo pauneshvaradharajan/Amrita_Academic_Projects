@@ -277,6 +277,16 @@ st.markdown("""
 .stApp input, .stApp textarea { color:#111 !important; }
 .footnote { color:#333 !important; }
 
+
+/* Keep Streamlit panels consistent with the white page */
+[data-testid="stExpander"], [data-testid="stExpander"] details,
+[data-testid="stExpander"] summary { background:#fff !important; color:#111 !important; }
+[data-testid="stExpander"] p, [data-testid="stExpander"] span,
+[data-testid="stExpander"] label { color:#111 !important; }
+[data-testid="stDataFrame"], [data-testid="stDataFrame"] * {
+  color:#111 !important; background-color:#fff !important;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
