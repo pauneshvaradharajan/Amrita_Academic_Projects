@@ -318,7 +318,7 @@ if question:
     history.append({"role": "assistant", "content": answer, "tools": tools_used, "sources": sources, "status": llm_status})
 
 for message in st.session_state.get("chat_history", []):
-    with st.chat_message(message["role"], avatar="🧑‍🔬" if message["role"] == "user" else "◉"):
+    with st.chat_message(message["role"]):
         st.markdown(message["content"])
         if message["role"] == "assistant":
             with st.expander("Evidence, sources and analysis steps"):
