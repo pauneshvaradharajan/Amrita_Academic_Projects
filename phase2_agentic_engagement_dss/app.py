@@ -271,7 +271,8 @@ st.markdown("""
 .block-container div[data-testid="stHorizontalBlock"] button * { color:#111 !important; }
 [data-testid="stChatMessage"] [data-testid="stMarkdownContainer"],
 [data-testid="stChatMessage"] [data-testid="stMarkdownContainer"] * { color:#111 !important; }
-[data-testid="stChatInput"] textarea { color:#111 !important; caret-color:#111 !important; }
+[data-testid="stChatInput"] { background:#fff !important; }
+[data-testid="stChatInput"] textarea { background:#fff !important; color:#111 !important; caret-color:#111 !important; }
 [data-testid="stChatInput"] textarea::placeholder { color:#444 !important; opacity:1 !important; }
 .stApp input, .stApp textarea { color:#111 !important; }
 .footnote { color:#333 !important; }
