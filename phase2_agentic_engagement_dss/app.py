@@ -256,6 +256,26 @@ def run_agent(question: str, df: pd.DataFrame, allow_llm: bool) -> tuple[str, li
 st.markdown("""
 <style>
 .stApp{background:#fff;color:#202123}[data-testid="stHeader"]{background:rgba(255,255,255,.94)}[data-testid="stSidebar"]{background:#f7f7f8;border-right:1px solid #e7e7e8}[data-testid="stSidebar"]>div:first-child{padding-top:1.1rem}.block-container{max-width:920px;padding-top:2rem;padding-bottom:7rem}.brand{font-size:1.05rem;font-weight:700;letter-spacing:-.02em;margin:.1rem 0 .15rem}.brand-sub{color:#777b82;font-size:.78rem;margin-bottom:1.2rem}.welcome{padding:3.2rem 1rem 1.6rem;text-align:center}.welcome h1{font-size:2.1rem;letter-spacing:-.045em;font-weight:650;color:#202123;margin-bottom:.45rem}.welcome p{color:#777b82;font-size:1rem}.stChatMessage{border:0;padding-top:.75rem;padding-bottom:.75rem}[data-testid="stChatMessage"] [data-testid="stMarkdownContainer"]{line-height:1.65}[data-testid="stChatInput"]{border:1px solid #d9dadd;border-radius:24px;box-shadow:0 3px 12px rgba(0,0,0,.06)}[data-testid="stChatInput"] textarea{padding:.9rem 1rem}.stButton button{border-radius:18px}.block-container div[data-testid="stHorizontalBlock"] button{background:#fff!important;color:#35373b!important;border:1px solid #e5e5e6!important;min-height:4.5rem;white-space:normal;text-align:left}[data-testid="stMetric"]{background:#fafafa;border:1px solid #ededee;border-radius:13px;padding:.75rem .9rem}.demo-note{background:#fff8e6;border:1px solid #f0dfb3;border-radius:10px;padding:.65rem .8rem;color:#66551f;font-size:.82rem}.footnote{color:#8a8d92;font-size:.76rem;text-align:center;padding:1rem 0 0}div[data-testid="stExpander"]{border:1px solid #e9e9ea;border-radius:12px}
+
+/* High-contrast text for the white workspace */
+.stApp, .stApp p, .stApp span, .stApp label, .stApp li, .stApp small,
+.stApp [data-testid="stMarkdownContainer"], .stApp [data-testid="stCaptionContainer"],
+.stApp [data-testid="stText"], .stApp [data-testid="stWidgetLabel"],
+.stApp [data-testid="stMetricLabel"], .stApp [data-testid="stMetricValue"],
+.stApp [data-testid="stMetricDelta"], .stApp [data-testid="stExpander"] summary,
+.stApp [data-testid="stTabs"] button, .stApp [role="radiogroup"],
+.stApp [role="radiogroup"] *, .stApp [role="switch"] { color:#111 !important; }
+.brand-sub, .welcome p { color:#222 !important; }
+.welcome h1 { color:#111 !important; }
+.block-container div[data-testid="stHorizontalBlock"] button,
+.block-container div[data-testid="stHorizontalBlock"] button * { color:#111 !important; }
+[data-testid="stChatMessage"] [data-testid="stMarkdownContainer"],
+[data-testid="stChatMessage"] [data-testid="stMarkdownContainer"] * { color:#111 !important; }
+[data-testid="stChatInput"] textarea { color:#111 !important; caret-color:#111 !important; }
+[data-testid="stChatInput"] textarea::placeholder { color:#444 !important; opacity:1 !important; }
+.stApp input, .stApp textarea { color:#111 !important; }
+.footnote { color:#333 !important; }
+
 </style>
 """, unsafe_allow_html=True)
 
