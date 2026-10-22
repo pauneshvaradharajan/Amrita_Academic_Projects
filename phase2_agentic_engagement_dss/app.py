@@ -278,14 +278,14 @@ st.markdown("""
 .footnote { color:#333 !important; }
 
 
-/* Keep Streamlit panels consistent with the white page */
+/* Keep Streamlit panels and download controls readable on white */
 [data-testid="stExpander"], [data-testid="stExpander"] details,
 [data-testid="stExpander"] summary { background:#fff !important; color:#111 !important; }
-[data-testid="stExpander"] p, [data-testid="stExpander"] span,
-[data-testid="stExpander"] label { color:#111 !important; }
-[data-testid="stDataFrame"], [data-testid="stDataFrame"] * {
-  color:#111 !important; background-color:#fff !important;
+[data-testid="stExpander"] p, [data-testid="stExpander"] span { color:#111 !important; }
+[data-testid="stDownloadButton"] button, [data-testid="stDownloadButton"] button * {
+  background:#fff !important; color:#111 !important; border-color:#c7c7c7 !important;
 }
+[data-testid="stDataFrame"] { background:#fff !important; color:#111 !important; }
 
 </style>
 """, unsafe_allow_html=True)
