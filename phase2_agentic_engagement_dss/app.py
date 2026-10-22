@@ -253,17 +253,28 @@ def run_agent(question: str, df: pd.DataFrame, allow_llm: bool) -> tuple[str, li
     return answer, selected, context, status
 
 
-st.title("🧠 MultiPENG Engagement Decision Support")
-st.caption("Explore engagement predictions, review charts, and ask an AI analyst for a source-grounded summary.")
+st.markdown("""
+<style>
+.stApp{background:#fff;color:#202123}[data-testid="stHeader"]{background:rgba(255,255,255,.94)}[data-testid="stSidebar"]{background:#f7f7f8;border-right:1px solid #e7e7e8}[data-testid="stSidebar"]>div:first-child{padding-top:1.1rem}.block-container{max-width:920px;padding-top:2rem;padding-bottom:7rem}.brand{font-size:1.05rem;font-weight:700;letter-spacing:-.02em;margin:.1rem 0 .15rem}.brand-sub{color:#777b82;font-size:.78rem;margin-bottom:1.2rem}.welcome{padding:3.2rem 1rem 1.6rem;text-align:center}.welcome h1{font-size:2.1rem;letter-spacing:-.045em;font-weight:650;color:#202123;margin-bottom:.45rem}.welcome p{color:#777b82;font-size:1rem}.stChatMessage{border:0;padding-top:.75rem;padding-bottom:.75rem}[data-testid="stChatMessage"] [data-testid="stMarkdownContainer"]{line-height:1.65}[data-testid="stChatInput"]{border:1px solid #d9dadd;border-radius:24px;box-shadow:0 3px 12px rgba(0,0,0,.06)}[data-testid="stChatInput"] textarea{padding:.9rem 1rem}.stButton button{border-radius:18px}[data-testid="stMetric"]{background:#fafafa;border:1px solid #ededee;border-radius:13px;padding:.75rem .9rem}.demo-note{background:#fff8e6;border:1px solid #f0dfb3;border-radius:10px;padding:.65rem .8rem;color:#66551f;font-size:.82rem}.footnote{color:#8a8d92;font-size:.76rem;text-align:center;padding:1rem 0 0}div[data-testid="stExpander"]{border:1px solid #e9e9ea;border-radius:12px}
+</style>
+""", unsafe_allow_html=True)
 
 with st.sidebar:
-    st.header("Choose session data")
-    data_mode = st.radio("Data source", ["Fictional demo data", "Upload Phase 1 predictions"], index=0)
+    st.markdown('<div class="brand">◉ MultiPENG</div><div class="brand-sub">Engagement research assistant</div>', unsafe_allow_html=True)
+    if st.button("＋  New conversation", use_container_width=True):
+        st.session_state.pop("chat_history", None)
+        st.session_state.pop("suggested_question", None)
+        st.rerun()
+    st.divider()
+    st.markdown("**Workspace data**")
+    data_mode = st.radio("Data source", ["Fictional demo data", "Upload Phase 1 predictions"], index=0, label_visibility="collapsed")
     if data_mode == "Upload Phase 1 predictions":
-        uploaded = st.file_uploader("Upload a prediction summary CSV", type=["csv"], help="Use session-level predictions only. Do not upload raw EEG, face, eye, or HR recordings to this public demo.")
-        st.caption("Uploaded data is used in this app session and is not written to the repository or a database.")
+        uploaded = st.file_uploader("Prediction summary CSV", type=["csv"], help="Upload session-level predictions only. Do not upload raw EEG, face, eye, or HR recordings to this public demo.")
+        st.caption("Uploaded data is used only for this app session.")
     else:
         uploaded = None
+    allow_llm = st.toggle("Enable Gemini responses", value=False, help="When enabled, your question, aggregate counts and retrieved project notes are sent to Google Gemini. Session rows, participant IDs and raw sensor features are excluded.")
+    st.caption("Local analytics and retrieval work when Gemini is off.")
 
 try:
     if data_mode == "Upload Phase 1 predictions" and uploaded is not None:
@@ -280,72 +291,76 @@ except Exception as exc:
     st.error(f"Could not load the prediction file: {exc}")
     st.stop()
 
-if st.session_state.get("is_demo", False):
-    st.info("Demo mode: these are fictional sample sessions. They are not MultiPENG participant results.")
-
 summary = summarize_data(data)
-metric_cols = st.columns(4)
-metric_cols[0].metric("Sessions", f"{summary['sessions']:,}")
-metric_cols[1].metric("Participants", f"{summary['participants']:,}")
-metric_cols[2].metric("Most common prediction", max(summary["class_counts"], key=summary["class_counts"].get))
-metric_cols[3].metric("Mean confidence", f"{summary['mean_confidence']:.1%}" if "mean_confidence" in summary else "Not supplied")
+if st.session_state.get("is_demo", False):
+    st.sidebar.markdown('<div class="demo-note">Demo workspace uses fictional sessions, not actual MultiPENG participant results.</div>', unsafe_allow_html=True)
 
-tab_overview, tab_agent, tab_data = st.tabs(["Overview", "Ask the AI analyst", "Data and report"])
-with tab_overview:
-    left, right = st.columns([1, 1])
-    with left:
-        counts = pd.DataFrame({"Engagement": CLASSES, "Sessions": [summary["class_counts"][c] for c in CLASSES]})
-        fig = px.bar(counts, x="Engagement", y="Sessions", color="Engagement", color_discrete_map=COLORS,
-                     title="Predicted engagement classes")
-        fig.update_layout(showlegend=False, margin=dict(l=10, r=10, t=50, b=10))
-        st.plotly_chart(fig, width="stretch")
-    with right:
-        if "timestamp" in data and data["timestamp"].notna().any():
-            by_day = data.dropna(subset=["timestamp"]).assign(Date=lambda x: x["timestamp"].dt.date.astype(str)).groupby(["Date", "predicted_engagement"]).size().reset_index(name="Sessions")
-            fig = px.line(by_day, x="Date", y="Sessions", color="predicted_engagement", markers=True,
-                          color_discrete_map=COLORS, title="Predictions over time")
+history = st.session_state.get("chat_history", [])
+if not history:
+    st.markdown('<div class="welcome"><h1>What would you like to understand?</h1><p>Ask about engagement patterns, model outputs, or the evidence behind them.</p></div>', unsafe_allow_html=True)
+    suggestions = ["Summarize the engagement distribution", "Which groups or classes need attention?", "Explain the limitations of these predictions"]
+    cols = st.columns(3)
+    for i, (col, prompt) in enumerate(zip(cols, suggestions)):
+        with col:
+            if st.button(prompt, key=f"suggestion_{i}", use_container_width=True):
+                st.session_state["suggested_question"] = prompt
+                st.rerun()
+else:
+    st.markdown("### ◉ MultiPENG research assistant")
+
+question = st.chat_input("Message MultiPENG research assistant…")
+question = st.session_state.pop("suggested_question", None) or question
+if question:
+    history = st.session_state.setdefault("chat_history", [])
+    history.append({"role": "user", "content": question})
+    with st.spinner("Reviewing session data and searching project sources…"):
+        answer, tools_used, sources, llm_status = run_agent(question, data, allow_llm)
+    history.append({"role": "assistant", "content": answer, "tools": tools_used, "sources": sources, "status": llm_status})
+
+for message in st.session_state.get("chat_history", []):
+    with st.chat_message(message["role"], avatar="🧑‍🔬" if message["role"] == "user" else "◉"):
+        st.markdown(message["content"])
+        if message["role"] == "assistant":
+            with st.expander("Evidence, sources and analysis steps"):
+                st.caption("Analysis tools: " + (", ".join(message.get("tools", [])) or "none"))
+                st.caption("Response mode: " + message.get("status", "Data-grounded local response."))
+                if message.get("sources"):
+                    for j, (chunk, score) in enumerate(message["sources"], 1):
+                        title = chunk.splitlines()[0].lstrip("# ")
+                        with st.expander(f"Source {j}: {title} · relevance {score:.2f}"):
+                            st.markdown(chunk)
+                else:
+                    st.write("No project passage matched this question. The answer uses computed session summaries only.")
+
+with st.expander("Explore analytics, records and exports"):
+    metric_cols = st.columns(4)
+    metric_cols[0].metric("Sessions", f"{summary['sessions']:,}")
+    metric_cols[1].metric("Participants", f"{summary['participants']:,}")
+    metric_cols[2].metric("Most common prediction", max(summary["class_counts"], key=summary["class_counts"].get))
+    metric_cols[3].metric("Mean confidence", f"{summary['mean_confidence']:.1%}" if "mean_confidence" in summary else "Not supplied")
+    chart_tab, records_tab, export_tab = st.tabs(["Patterns", "Prediction records", "Export"])
+    with chart_tab:
+        left, right = st.columns(2)
+        with left:
+            counts = pd.DataFrame({"Engagement": CLASSES, "Sessions": [summary["class_counts"][c] for c in CLASSES]})
+            fig = px.bar(counts, x="Engagement", y="Sessions", color="Engagement", color_discrete_map=COLORS, title="Predicted engagement classes")
+            fig.update_layout(showlegend=False, margin=dict(l=10, r=10, t=50, b=10))
             st.plotly_chart(fig, width="stretch")
-        else:
-            st.caption("Add a timestamp column to show a time trend.")
-    st.subheader("What this summary means")
-    st.write(f"The current data contains **{summary['sessions']} sessions**. Predicted class counts are Low **{summary['class_counts']['Low']}**, Medium **{summary['class_counts']['Medium']}**, and High **{summary['class_counts']['High']}**. These are model predictions, not confirmed emotional states.")
-
-with tab_agent:
-    st.subheader("Ask a question about these sessions")
-    question = st.text_input("Question", placeholder="Example: Summarize the engagement distribution and explain the limitations")
-    allow_llm = st.checkbox(
-        "Allow Gemini to receive my question and aggregate results",
-        value=False,
-        help="When enabled, the app sends the question, aggregate counts, and retrieved project notes to Google Gemini. It does not send session rows, participant IDs, or raw sensor features.",
-    )
-    if st.button("Analyze", type="primary", disabled=not question.strip()):
-        with st.spinner("The agent is analyzing the data and searching project notes..."):
-            answer, tools_used, sources, llm_status = run_agent(question, data, allow_llm)
-        st.session_state["last_agent"] = {"question": question, "answer": answer, "tools": tools_used,
-                                           "sources": sources, "status": llm_status}
-    result = st.session_state.get("last_agent")
-    if result:
-        st.markdown("### Explanation")
-        st.write(result["answer"])
-        with st.expander("How the agent reached this answer"):
-            st.write("**Analysis tools used:** " + ", ".join(result["tools"]))
-            st.write("**Language model:** " + result["status"])
-            st.write("**Retrieved project notes:**")
-            if result["sources"]:
-                for i, (chunk, score) in enumerate(result["sources"], 1):
-                    st.markdown(f"**Source {i}** · match {score:.2f}\n\n{chunk}")
+        with right:
+            if "timestamp" in data and data["timestamp"].notna().any():
+                by_day = data.dropna(subset=["timestamp"]).assign(Date=lambda x: x["timestamp"].dt.date.astype(str)).groupby(["Date", "predicted_engagement"]).size().reset_index(name="Sessions")
+                fig = px.line(by_day, x="Date", y="Sessions", color="predicted_engagement", markers=True, color_discrete_map=COLORS, title="Predictions over time")
+                st.plotly_chart(fig, width="stretch")
             else:
-                st.write("No project note matched this question; the answer uses computed session summaries only.")
+                st.info("Add a timestamp column to the prediction CSV to see time trends.")
+    with records_tab:
+        visible_cols = [c for c in ["participant_id", "session_id", "session_number", "timestamp", "game", "difficulty", "predicted_engagement", "confidence"] if c in data.columns]
+        st.dataframe(data[visible_cols], width="stretch", hide_index=True)
+    with export_tab:
+        report = create_report(data, summary)
+        st.download_button("Download analysis summary", report, file_name="multipeng_engagement_summary.md", mime="text/markdown")
+        template = pd.DataFrame(columns=["participant_id", "session_id", "predicted_engagement", "confidence", "timestamp", "game", "difficulty"])
+        st.download_button("Download prediction CSV template", template.to_csv(index=False), file_name="phase1_prediction_template.csv", mime="text/csv")
+        st.caption("This app summarizes stored predictions. It does not train or change the Phase 1 classifier.")
 
-with tab_data:
-    st.subheader("Session prediction records")
-    visible_cols = [c for c in ["participant_id", "session_id", "session_number", "timestamp", "game", "difficulty", "predicted_engagement", "confidence"] if c in data.columns]
-    st.dataframe(data[visible_cols], width="stretch", hide_index=True)
-    report = create_report(data, summary)
-    st.download_button("Download summary report", report, file_name="multipeng_engagement_summary.md", mime="text/markdown")
-    template = pd.DataFrame(columns=["participant_id", "session_id", "predicted_engagement", "confidence", "timestamp", "game", "difficulty"])
-    st.download_button("Download CSV template", template.to_csv(index=False), file_name="phase1_prediction_template.csv", mime="text/csv")
-    st.caption("The app summarizes session predictions only. It does not train or change the Phase 1 classifier.")
-
-st.divider()
-st.caption("Research decision support only · predictions can be wrong · do not use for clinical or high-impact decisions.")
+st.markdown('<div class="footnote">Research decision support only · predictions can be wrong · not for clinical or high-impact decisions</div>', unsafe_allow_html=True)
