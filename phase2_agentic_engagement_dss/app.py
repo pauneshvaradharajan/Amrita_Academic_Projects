@@ -417,6 +417,8 @@ def deterministic_answer(question: str, results: list[dict], context: list[tuple
         if summary.get("evaluation"):
             weak = min(CLASSES, key=lambda name: summary["evaluation"]["per_class"][name]["recall"])
             pieces.append(f"Among the classes, {weak} has the lowest recall ({summary['evaluation']['per_class'][weak]['recall']:.1%}) and is the first class to review.")
+        elif any(x in q for x in ["attention", "weakest", "hard to predict", "error", "mistake"]):
+            pieces.append("This file has no actual labels, so I cannot tell which class the model predicts poorly. The class counts show imbalance in predictions only. Upload actual labels alongside predictions to measure class-wise recall and errors.")
     elif any(x in q for x in ["data", "file", "missing", "quality", "available", "what did you"]):
         pieces.append(f"The current file contains {summary['sessions']} sessions across {summary['participants']} participants. It contains {'actual engagement labels, so evaluation metrics can be computed' if summary.get('evaluation') else 'predictions only, so accuracy cannot be computed'}.")
         if summary.get("prediction_method"):
@@ -446,7 +448,7 @@ def deterministic_answer(question: str, results: list[dict], context: list[tuple
                 pieces.append(result["note"])
         if result["tool"] == "visualization":
             pieces.append("I added the available class-distribution chart to the analytics view. It compares actual and predicted classes when actual labels are present; timestamps are needed for a time trend.")
-    if context and not performance_question:
+    if context and not performance_question and not assistant_question:
         pieces.append("Project reference consulted: " + context[0][0].splitlines()[0].lstrip("# ") + ".")
     pieces.append("These are model outputs, not ground truth or clinical conclusions.")
     return " ".join(pieces)
