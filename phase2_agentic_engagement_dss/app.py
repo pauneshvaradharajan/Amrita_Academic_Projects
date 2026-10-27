@@ -544,7 +544,7 @@ def deterministic_answer(question: str, results: list[dict], context: list[tuple
                 pieces.append(f"The most frequent error is actual {top['actual']} predicted as {top['predicted_as']} ({top['sessions']} sessions). The confusion matrix is shown in Model evaluation.")
             elif not result.get("available"):
                 pieces.append(result["note"])
-        if result["tool"] == "visualization":
+        if result["tool"] == "visualization" and wants_plot(question):
             pieces.append("I rendered a data-based plot below this answer. It uses only fields available in the uploaded file.")
     if context and not performance_question and not assistant_question:
         pieces.append("Project reference consulted: " + context[0][0].splitlines()[0].lstrip("# ") + ".")
@@ -612,7 +612,7 @@ Evidence rules:
 - Use clear Markdown headings when useful. When the user asks for a list or bullets, answer as a bullet list; when they ask for steps, number them. When they ask for a table, summarize the computed aggregate results in a Markdown table. When they ask for a plot, state what is plotted; the app renders the actual Plotly chart below your answer, so never claim a plot exists unless the app requested one.
 - Do not invent numerical feature distributions. If the file has no continuous numeric features, explain that only class counts can be plotted.
 
-Previous user question (for resolving short follow-ups only; do not treat it as evidence): {sanitize_question(previous_question, df) if previous_question else "None"}
+Previous user question (for resolving short follow-ups only; do not repeat its requested output format or tools unless the current question asks): {sanitize_question(previous_question, df) if previous_question else "None"}
 Current user question: {sanitize_question(question, df)}
 
 Computed aggregate results (authoritative for counts; contains no session rows or identifiers):
@@ -637,7 +637,9 @@ Retrieved project notes:
 
 
 def run_agent(question: str, df: pd.DataFrame, allow_llm: bool, previous_question: str = "") -> tuple[str, list[str], list[tuple[str, float]], str]:
-    selected = choose_tools(question + " " + previous_question, df)
+    # Route the current request on its own so a prior plot/table request does not
+    # leak its output format into the next turn. Previous context is only for RAG/LLM follow-ups.
+    selected = choose_tools(question, df)
     results = [run_analysis_tool(name, df) for name in selected]
     context = retrieve_context(question + " " + previous_question)
     answer, status = llm_answer(question, results, context, df, allow_llm, previous_question)
