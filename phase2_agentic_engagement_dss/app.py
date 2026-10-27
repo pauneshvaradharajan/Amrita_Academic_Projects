@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import hashlib
 import json
+import logging
 import os
 import re
 from datetime import datetime
@@ -464,6 +465,25 @@ def sanitize_question(question: str, df: pd.DataFrame) -> str:
     return safe_question
 
 
+def safe_gemini_error(exc: Exception, api_key: str) -> str:
+    """Return a short diagnostic while removing credentials and request content."""
+    status = getattr(exc, "status", None)
+    code = getattr(exc, "code", None)
+    detail = getattr(exc, "message", None) or str(exc)
+    detail = re.sub(r"\s+", " ", str(detail)).strip()
+    if api_key:
+        detail = detail.replace(api_key, "[redacted]")
+    detail = re.sub(r"(?i)(AIza[0-9A-Za-z_-]{20,})", "[redacted-key]", detail)
+    detail = re.sub(r"(?i)([?&](?:key|api_key)=)[^&\s]+", r"\1[redacted]", detail)
+    detail = detail[:240] or "No additional error message was provided."
+    parts = [type(exc).__name__]
+    if status is not None:
+        parts.append(f"HTTP {status}")
+    elif code is not None:
+        parts.append(f"code {code}")
+    return f"{' · '.join(parts)}: {detail}"
+
+
 def llm_answer(question: str, results: list[dict], context: list[tuple[str, float]], df: pd.DataFrame, allow_llm: bool, previous_question: str = "") -> tuple[str, str]:
     try:
         api_key = st.secrets.get("GEMINI_API_KEY", os.getenv("GEMINI_API_KEY", ""))
@@ -512,7 +532,9 @@ Retrieved project notes:
             raise RuntimeError("The language model returned an empty answer.")
         return answer, "Gemini generated this explanation from aggregate results and retrieved project notes."
     except Exception as exc:
-        return deterministic_answer(question, results, context, df), f"LLM unavailable ({type(exc).__name__}); used the data-grounded fallback."
+        diagnostic = safe_gemini_error(exc, api_key)
+        logging.getLogger(__name__).warning("Gemini request failed (%s)", diagnostic)
+        return deterministic_answer(question, results, context, df), f"Gemini request failed — {diagnostic}. Showing the data-grounded fallback."
 
 
 def run_agent(question: str, df: pd.DataFrame, allow_llm: bool, previous_question: str = "") -> tuple[str, list[str], list[tuple[str, float]], str]:
