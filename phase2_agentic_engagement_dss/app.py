@@ -386,8 +386,66 @@ def wants_bullets(question: str) -> bool:
     return any(term in q for term in ["bullet", "list out", "list the", "list all", "step by step", "outline", "what can you do"])
 
 
-def format_requested_answer(answer: str, question: str) -> str:
+def requested_line_count(question: str) -> int | None:
+    match = re.search(r"\b(?:in|exactly|give me)?\s*(\d{1,2})\s+lines?\b", question.lower())
+    return min(int(match.group(1)), 30) if match else None
+
+
+def evidence_lines(df: pd.DataFrame, previous_question: str = "") -> list[str]:
+    """Prepare plain-English presentation lines from computed CSV fields only."""
+    summary = summarize_data(df)
+    lines = [
+        f"The uploaded prediction file contains {summary['sessions']:,} sessions across {summary['participants']:,} participants.",
+        "Engagement is reported in three grouped classes: Low, Medium, and High.",
+        "Predicted counts are " + "; ".join(f"{name}: {summary['class_counts'][name]} ({summary['class_percent'][name]:.1f}%)" for name in CLASSES) + ".",
+    ]
+    if summary.get("actual_class_counts"):
+        lines.append("Actual counts are " + "; ".join(f"{name}: {summary['actual_class_counts'][name]} ({summary['actual_class_percent'][name]:.1f}%)" for name in CLASSES) + ".")
+    ev = summary.get("evaluation")
+    if ev:
+        lines.extend([
+            f"Accuracy on {ev['n_labeled']:,} labeled sessions is {ev['accuracy']:.1%}.",
+            f"Macro-F1 is {ev['macro_f1']:.3f}; weighted-F1 is {ev['weighted_f1']:.3f}.",
+            f"Balanced accuracy is {ev['balanced_accuracy']:.3f}; MCC is {ev['mcc']:.3f}.",
+            "Recall by class is " + "; ".join(f"{name}: {ev['per_class'][name]['recall']:.1%}" for name in CLASSES) + ".",
+            f"The majority-class baseline is {ev['majority_baseline_accuracy']:.1%} ({ev['majority_class']}).",
+            "Compare the model with that baseline and the per-class scores, not accuracy alone.",
+        ])
+        weakest = min(CLASSES, key=lambda name: ev["per_class"][name]["recall"])
+        lines.append(f"{weakest} has the lowest recall ({ev['per_class'][weakest]['recall']:.1%}) and needs the closest review.")
+    else:
+        lines.extend([
+            "This file does not contain usable actual labels alongside predictions.",
+            "Accuracy, F1, and class-wise errors cannot be verified from predictions alone.",
+            "The predicted class distribution describes model outputs, not whether they are correct.",
+        ])
+    if summary.get("prediction_method"):
+        lines.append(f"The recorded Phase 1 method is {summary['prediction_method']}.")
+    if summary.get("prediction_protocol"):
+        lines.append(f"The recorded evaluation protocol is {summary['prediction_protocol']}.")
+    lines.extend([
+        "A larger class count can reflect class imbalance and should be interpreted with care.",
+        "These results describe the uploaded sessions and do not establish performance on new participants.",
+        "The system reports model predictions; it does not directly measure a person's internal state.",
+        "Use the confusion matrix and class-wise recall to explain where predictions are most difficult.",
+    ])
+    return lines
+
+
+def format_requested_answer(answer: str, question: str, df: pd.DataFrame | None = None, previous_question: str = "") -> str:
     """Honor an explicit request for a list even when the LLM replies in prose."""
+    line_count = requested_line_count(question)
+    if line_count is not None and df is not None:
+        answer_lines = [line.strip() for line in answer.splitlines() if line.strip()]
+        if len(answer_lines) == line_count:
+            clean_lines = [re.sub(r"^\s*(?:[-*]|\d+[.)])\s*", "", line) for line in answer_lines]
+            return "\n".join(f"{i}. {line}" for i, line in enumerate(clean_lines, 1))
+        # If Gemini ignores or truncates the requested length, use calculated
+        # CSV facts to guarantee the exact count without padding with guesses.
+        factual = evidence_lines(df, previous_question)
+        while len(factual) < line_count:
+            factual.append("Treat this as descriptive decision support and verify the underlying study protocol before making claims.")
+        return "\n".join(f"{i}. {line}" for i, line in enumerate(factual[:line_count], 1))
     if not wants_bullets(question) or re.search(r"(?m)^\s*(?:[-*]|\d+[.)])\s+", answer):
         return answer
     sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+", answer.strip()) if part.strip()]
@@ -590,9 +648,9 @@ def llm_answer(question: str, results: list[dict], context: list[tuple[str, floa
         api_key = os.getenv("GEMINI_API_KEY", "")
         model_name = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
     if not allow_llm:
-        return format_requested_answer(deterministic_answer(question, results, context, df), question), "Gemini is off; no user question or uploaded data was sent to an external LLM."
+        return format_requested_answer(deterministic_answer(question, results, context, df), question, df, previous_question), "Gemini is off; no user question or uploaded data was sent to an external LLM."
     if not api_key:
-        return format_requested_answer(deterministic_answer(question, results, context, df), question), "No GEMINI_API_KEY is configured; showing the data-grounded explanation without an LLM."
+        return format_requested_answer(deterministic_answer(question, results, context, df), question, df, previous_question), "No GEMINI_API_KEY is configured; showing the data-grounded explanation without an LLM."
     try:
         from google import genai
         from google.genai import types
@@ -600,6 +658,8 @@ def llm_answer(question: str, results: list[dict], context: list[tuple[str, floa
         client = genai.Client(api_key=api_key)
         kb = "\n\n".join(f"[Source {i + 1}] {chunk}" for i, (chunk, _) in enumerate(context)) or "No matching project source was retrieved."
         payload = json.dumps(results, ensure_ascii=False, default=str)
+        line_count = requested_line_count(question)
+        line_instruction = (f"The user requested exactly {line_count} lines: return exactly {line_count} separate numbered lines, one complete point per line, with no extra introduction or conclusion." if line_count else "Follow any requested response format exactly.")
         prompt = f"""You are the MultiPENG research decision-support assistant. Give a clear, natural answer in simple English, directly addressing the question. Use the available analysis tools like an analyst: explain what the numbers mean, highlight useful comparisons, and give practical next steps only when the evidence supports them.
 
 Evidence rules:
@@ -611,6 +671,7 @@ Evidence rules:
 - State uncertainty and minority-class weaknesses in plain language. Do not claim clinical validity or perfect accuracy.
 - Do not expose participant or session identifiers in your answer.
 - Use clear Markdown headings when useful. When the user asks for a list or bullets, answer as a bullet list; when they ask for steps, number them. When they ask for a table, summarize the computed aggregate results in a Markdown table. When they ask for a plot, state what is plotted; the app renders the actual Plotly chart below your answer, so never claim a plot exists unless the app requested one.
+- {line_instruction}
 - Do not invent numerical feature distributions. If the file has no continuous numeric features, explain that only class counts can be plotted.
 
 Previous user question (for resolving short follow-ups only; do not repeat its requested output format or tools unless the current question asks): {sanitize_question(previous_question, df) if previous_question else "None"}
@@ -630,17 +691,26 @@ Retrieved project notes:
         answer = (response.text or "").strip()
         if not answer:
             raise RuntimeError("The language model returned an empty answer.")
-        return format_requested_answer(answer, question), "Gemini generated this explanation from aggregate results and retrieved project notes."
+        generated_lines = [line for line in answer.splitlines() if line.strip()]
+        formatted = format_requested_answer(answer, question, df, previous_question)
+        status = "Gemini generated this explanation from aggregate results and retrieved project notes."
+        if line_count is not None and len(generated_lines) != line_count:
+            status = f"Gemini's reply was reformatted to exactly {line_count} evidence-based lines using calculated CSV results."
+        return formatted, status
     except Exception as exc:
         diagnostic = safe_gemini_error(exc, api_key)
         logging.getLogger(__name__).warning("Gemini request failed (%s)", diagnostic)
-        return format_requested_answer(deterministic_answer(question, results, context, df), question), f"Gemini request failed — {diagnostic}. Showing the data-grounded fallback."
+        return format_requested_answer(deterministic_answer(question, results, context, df), question, df, previous_question), f"Gemini request failed — {diagnostic}. Showing the data-grounded fallback."
 
 
 def run_agent(question: str, df: pd.DataFrame, allow_llm: bool, previous_question: str = "") -> tuple[str, list[str], list[tuple[str, float]], str]:
     # Route the current request on its own so a prior plot/table request does not
     # leak its output format into the next turn. Previous context is only for RAG/LLM follow-ups.
-    selected = choose_tools(question, df)
+    is_line_followup = requested_line_count(question) is not None and len(question.split()) <= 5
+    selected = choose_tools(previous_question if is_line_followup and previous_question else question, df)
+    if requested_line_count(question) is not None and summarize_data(df).get("evaluation"):
+        selected.append("model_performance")
+    selected = list(dict.fromkeys(selected))
     results = [run_analysis_tool(name, df) for name in selected]
     context = retrieve_context(question + " " + previous_question)
     answer, status = llm_answer(question, results, context, df, allow_llm, previous_question)
