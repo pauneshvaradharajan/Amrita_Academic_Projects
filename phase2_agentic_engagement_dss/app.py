@@ -360,7 +360,7 @@ def choose_tools(question: str, df: pd.DataFrame) -> list[str]:
         tools.append("model_performance")
     if any(x in q for x in ["error", "mistake", "wrong", "confus", "misclassif"]):
         tools.append("error_analysis")
-    if any(x in q for x in ["plot", "chart", "graph", "visual", "show me"]):
+    if any(x in q for x in ["plot", "chart", "graph", "visual", "histogram", "hist plot", "show me"]):
         tools.append("visualization")
     if any(x in q for x in ["recommend", "action", "what should", "improve", "next step", "decision", "suggest", "limitation", "weakness", "reliable", "trust"]):
         tools.append("recommendations")
@@ -369,6 +369,92 @@ def choose_tools(question: str, df: pd.DataFrame) -> list[str]:
     if broad_analysis:
         tools.extend(["data_quality", "recommendations"])
     return list(dict.fromkeys(tools))
+
+
+def wants_plot(question: str) -> bool:
+    q = question.lower()
+    return any(term in q for term in ["plot", "chart", "graph", "visual", "histogram", "hist plot"])
+
+
+def wants_table(question: str) -> bool:
+    q = question.lower()
+    return any(term in q for term in ["table", "tabulate", "tabular"])
+
+
+def wants_bullets(question: str) -> bool:
+    q = question.lower()
+    return any(term in q for term in ["bullet", "list out", "list the", "list all", "step by step", "outline", "what can you do"])
+
+
+def format_requested_answer(answer: str, question: str) -> str:
+    """Honor an explicit request for a list even when the LLM replies in prose."""
+    if not wants_bullets(question) or re.search(r"(?m)^\s*(?:[-*]|\d+[.)])\s+", answer):
+        return answer
+    sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+", answer.strip()) if part.strip()]
+    return "\n".join(f"- {sentence}" for sentence in sentences)
+
+
+def make_question_plot(question: str, df: pd.DataFrame):
+    """Build a real plot from uploaded fields; fall back to valid class counts."""
+    q = question.lower()
+    summary = summarize_data(df)
+    if summary.get("evaluation") and any(word in q for word in ["confusion", "misclass", "error matrix"]):
+        cm = pd.DataFrame(summary["evaluation"]["confusion_matrix"], index=CLASSES, columns=CLASSES)
+        fig = px.imshow(cm, text_auto=True, x=CLASSES, y=CLASSES, color_continuous_scale="Blues",
+                        labels={"x": "Predicted", "y": "Actual", "color": "Sessions"}, title="Confusion matrix")
+        return fig, "Counts use rows with both actual and predicted labels."
+
+    if "timestamp" in df and df["timestamp"].notna().any() and any(word in q for word in ["time", "trend", "over time", "timeline"]):
+        dated = df.dropna(subset=["timestamp"]).copy()
+        dated["Date"] = dated["timestamp"].dt.date.astype(str)
+        trend = dated.groupby(["Date", "predicted_engagement"]).size().reset_index(name="Sessions")
+        fig = px.line(trend, x="Date", y="Sessions", color="predicted_engagement", markers=True,
+                      color_discrete_map=COLORS, title="Predicted engagement over time")
+        return fig, "Daily prediction counts; this is descriptive and does not show causation."
+
+    if "hist" in q:
+        numeric = [c for c in df.select_dtypes(include=np.number).columns
+                   if not any(token in c.lower() for token in ["participant", "session", "record", "index", "engagement", "label", "class", "predicted", "actual", "id"])]
+        preferred = [c for c in numeric if any(token in c.lower() for token in ["confidence", "probability", "entropy", "score"])]
+        column = preferred[0] if preferred else (numeric[0] if numeric else None)
+        if column:
+            values = pd.to_numeric(df[column], errors="coerce").dropna()
+            fig = px.histogram(values, x=column, nbins=20, title=f"Distribution of {column}", labels={"count": "Sessions"})
+            return fig, f"Histogram of the uploaded numeric field '{column}' ({len(values)} valid values)."
+
+    rows = []
+    for label in CLASSES:
+        row = {"Engagement": label, "Predicted sessions": summary["class_counts"][label]}
+        if summary.get("actual_class_counts"):
+            row["Actual sessions"] = summary["actual_class_counts"][label]
+        rows.append(row)
+    chart_data = pd.DataFrame(rows).melt(id_vars="Engagement", var_name="Series", value_name="Sessions")
+    fig = px.bar(chart_data, x="Engagement", y="Sessions", color="Series", barmode="group",
+                 color_discrete_map={"Actual sessions": "#4C78A8", "Predicted sessions": "#F2A541"},
+                 category_orders={"Engagement": CLASSES}, title="Engagement class counts")
+    return fig, "Class-count chart. The uploaded prediction file does not contain continuous sensor features to histogram." if "hist" in q else "Counts are predictions; actual counts appear only when actual labels are supplied."
+
+
+def make_question_table(question: str, df: pd.DataFrame) -> pd.DataFrame:
+    """Return a safe aggregate table, never raw participant/session records."""
+    summary = summarize_data(df)
+    q = question.lower()
+    if summary.get("evaluation") and any(word in q for word in ["performance", "metric", "accuracy", "f1", "precision", "recall"]):
+        ev = summary["evaluation"]
+        return pd.DataFrame([
+            {"Engagement": cls, "Actual sessions": ev["per_class"][cls]["support"],
+             "Precision": ev["per_class"][cls]["precision"], "Recall": ev["per_class"][cls]["recall"], "F1": ev["per_class"][cls]["f1"]}
+            for cls in CLASSES
+        ])
+    rows = []
+    for cls in CLASSES:
+        row = {"Engagement": cls, "Predicted sessions": summary["class_counts"][cls],
+               "Predicted share (%)": summary["class_percent"][cls]}
+        if summary.get("actual_class_counts"):
+            row["Actual sessions"] = summary["actual_class_counts"][cls]
+            row["Actual share (%)"] = summary["actual_class_percent"][cls]
+        rows.append(row)
+    return pd.DataFrame(rows)
 
 
 def deterministic_answer(question: str, results: list[dict], context: list[tuple[str, float]], df: pd.DataFrame) -> str:
@@ -380,7 +466,18 @@ def deterministic_answer(question: str, results: list[dict], context: list[tuple
     class_question = any(x in q for x in ["class", "low", "medium", "high", "imbalance", "distribution", "which group"])
     recommendation_question = any(x in q for x in ["recommend", "action", "what should", "improve", "next step", "decision", "suggest", "limitation", "weakness"])
     assistant_question = any(x in q for x in ["rag", "llm", "gemini", "agent", "where do you get", "how do you answer", "how does this work", "how are answers"])
-    if assistant_question:
+    capability_question = any(x in q for x in ["what can you do", "what all can you do", "list out what", "list what you can"])
+    if capability_question:
+        pieces.append("I can help with these tasks using the current prediction file:")
+        pieces.extend([
+            "- Summarize predicted engagement counts and percentages.",
+            "- Compare predictions with actual labels and report accuracy, Macro-F1, per-class metrics, and confusion patterns when actual labels are present.",
+            "- Create class-count, confidence, time-trend, or confusion-matrix plots when the required columns are available.",
+            "- Show safe aggregate tables, check available fields, and explain limitations or next steps.",
+            "- Explain project methods using retrieved project notes; Gemini can rewrite the evidence in natural language when the API is available.",
+        ])
+        pieces.append("I do not retrain the Phase 1 model or infer accuracy from predictions without ground-truth labels.")
+    elif assistant_question:
         pieces.append("I answer from three places: calculations on the uploaded Phase 1 prediction CSV, relevant project notes retrieved from the local knowledge base (RAG), and—only when Gemini is enabled and an API key is configured—a language model that explains those results. Without the key, the local analyst uses evidence-based response templates; it does not behave like an open-ended ChatGPT model. The analysis tools are predefined and selected from your question, so this is a bounded decision-support agent rather than an unrestricted autonomous agent.")
         if context:
             pieces.append("Relevant project reference: " + context[0][0].splitlines()[0].lstrip("# ") + ".")
@@ -448,7 +545,7 @@ def deterministic_answer(question: str, results: list[dict], context: list[tuple
             elif not result.get("available"):
                 pieces.append(result["note"])
         if result["tool"] == "visualization":
-            pieces.append("I added the available class-distribution chart to the analytics view. It compares actual and predicted classes when actual labels are present; timestamps are needed for a time trend.")
+            pieces.append("I rendered a data-based plot below this answer. It uses only fields available in the uploaded file.")
     if context and not performance_question and not assistant_question:
         pieces.append("Project reference consulted: " + context[0][0].splitlines()[0].lstrip("# ") + ".")
     pieces.append("These are model outputs, not ground truth or clinical conclusions.")
@@ -492,9 +589,9 @@ def llm_answer(question: str, results: list[dict], context: list[tuple[str, floa
         api_key = os.getenv("GEMINI_API_KEY", "")
         model_name = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
     if not allow_llm:
-        return deterministic_answer(question, results, context, df), "Gemini is off; no user question or uploaded data was sent to an external LLM."
+        return format_requested_answer(deterministic_answer(question, results, context, df), question), "Gemini is off; no user question or uploaded data was sent to an external LLM."
     if not api_key:
-        return deterministic_answer(question, results, context, df), "No GEMINI_API_KEY is configured; showing the data-grounded explanation without an LLM."
+        return format_requested_answer(deterministic_answer(question, results, context, df), question), "No GEMINI_API_KEY is configured; showing the data-grounded explanation without an LLM."
     try:
         from google import genai
         from google.genai import types
@@ -512,6 +609,8 @@ Evidence rules:
 - If the CSV lacks a needed field, say what is missing and ask for the right file/column.
 - State uncertainty and minority-class weaknesses in plain language. Do not claim clinical validity or perfect accuracy.
 - Do not expose participant or session identifiers in your answer.
+- Use clear Markdown headings when useful. When the user asks for a list or bullets, answer as a bullet list; when they ask for steps, number them. When they ask for a table, summarize the computed aggregate results in a Markdown table. When they ask for a plot, state what is plotted; the app renders the actual Plotly chart below your answer, so never claim a plot exists unless the app requested one.
+- Do not invent numerical feature distributions. If the file has no continuous numeric features, explain that only class counts can be plotted.
 
 Previous user question (for resolving short follow-ups only; do not treat it as evidence): {sanitize_question(previous_question, df) if previous_question else "None"}
 Current user question: {sanitize_question(question, df)}
@@ -530,11 +629,11 @@ Retrieved project notes:
         answer = (response.text or "").strip()
         if not answer:
             raise RuntimeError("The language model returned an empty answer.")
-        return answer, "Gemini generated this explanation from aggregate results and retrieved project notes."
+        return format_requested_answer(answer, question), "Gemini generated this explanation from aggregate results and retrieved project notes."
     except Exception as exc:
         diagnostic = safe_gemini_error(exc, api_key)
         logging.getLogger(__name__).warning("Gemini request failed (%s)", diagnostic)
-        return deterministic_answer(question, results, context, df), f"Gemini request failed — {diagnostic}. Showing the data-grounded fallback."
+        return format_requested_answer(deterministic_answer(question, results, context, df), question), f"Gemini request failed — {diagnostic}. Showing the data-grounded fallback."
 
 
 def run_agent(question: str, df: pd.DataFrame, allow_llm: bool, previous_question: str = "") -> tuple[str, list[str], list[tuple[str, float]], str]:
@@ -674,13 +773,22 @@ if question:
         answer, tools_used, sources, llm_status = run_agent(question, data, allow_llm, previous_question)
     history.append({
         "role": "assistant", "content": answer, "tools": tools_used,
-        "sources": sources, "status": llm_status,
+        "sources": sources, "status": llm_status, "question": question,
+        "plot_requested": wants_plot(question), "table_requested": wants_table(question),
     })
 
 for i, message in enumerate(st.session_state.get("chat_history", [])):
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
         if message["role"] == "assistant":
+            if message.get("plot_requested"):
+                figure, plot_note = make_question_plot(message.get("question", ""), data)
+                st.plotly_chart(figure, width="stretch", key=f"chat_plot_{i}")
+                st.caption(plot_note)
+            if message.get("table_requested"):
+                st.markdown("**Aggregate results**")
+                table = make_question_table(message.get("question", ""), data)
+                st.dataframe(table, width="stretch", hide_index=True)
             st.caption("Answer source: " + message.get("status", "Local evidence-based assistant."))
             with st.expander("Evidence, retrieved sources and analysis steps"):
                 tool_labels = {
