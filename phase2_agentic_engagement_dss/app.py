@@ -549,7 +549,8 @@ def deterministic_answer(question: str, results: list[dict], context: list[tuple
     if context and not performance_question and not assistant_question:
         pieces.append("Project reference consulted: " + context[0][0].splitlines()[0].lstrip("# ") + ".")
     pieces.append("These are model outputs, not ground truth or clinical conclusions.")
-    return " ".join(pieces)
+    separator = "\n\n" if wants_bullets(question) else " "
+    return separator.join(pieces)
 
 
 def sanitize_question(question: str, df: pd.DataFrame) -> str:
