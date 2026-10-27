@@ -466,7 +466,7 @@ def deterministic_answer(question: str, results: list[dict], context: list[tuple
     class_question = any(x in q for x in ["class", "low", "medium", "high", "imbalance", "distribution", "which group"])
     recommendation_question = any(x in q for x in ["recommend", "action", "what should", "improve", "next step", "decision", "suggest", "limitation", "weakness"])
     assistant_question = any(x in q for x in ["rag", "llm", "gemini", "agent", "where do you get", "how do you answer", "how does this work", "how are answers"])
-    capability_question = any(x in q for x in ["what can you do", "what all can you do", "list out what", "list what you can"])
+    capability_question = any(x in q for x in ["what can you do", "what all can you do", "list out what", "list what you can", "list all", "list everything", "list the things you can"])
     if capability_question:
         pieces.append("I can help with these tasks using the current prediction file:")
         pieces.extend([
