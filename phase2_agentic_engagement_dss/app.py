@@ -364,6 +364,87 @@ def is_error_analysis_question(question: str) -> bool:
     return any(term in q for term in ["mistake", "error", "confusion", "misclass"])
 
 
+def is_metric_verification_question(question: str) -> bool:
+    q = question.lower()
+    asks_to_recheck = any(term in q for term in ["recalculate", "recompute", "independently", "verify", "double-check", "check again"])
+    asks_about_metrics = any(term in q for term in ["accuracy", "f1", "f-score", "metric", "confusion matrix"])
+    return asks_to_recheck and asks_about_metrics
+
+
+def independently_recalculate_metrics(df: pd.DataFrame) -> str:
+    """Recompute classification metrics from confusion-matrix counts and compare."""
+    summary = summarize_data(df)
+    evaluation = summary.get("evaluation")
+    if not evaluation:
+        return (
+            "## Independent metric check\n\n"
+            "I cannot recalculate accuracy or F1 because the uploaded file does not contain both actual and predicted engagement labels. "
+            "Upload a file with both label columns to perform this check."
+        )
+
+    matrix = np.asarray(evaluation["confusion_matrix"], dtype=np.int64)
+    row_totals = matrix.sum(axis=1)
+    column_totals = matrix.sum(axis=0)
+    total = int(matrix.sum())
+    diagonal = np.diag(matrix).astype(float)
+    precision = np.divide(diagonal, column_totals, out=np.zeros(3, dtype=float), where=column_totals != 0)
+    recall = np.divide(diagonal, row_totals, out=np.zeros(3, dtype=float), where=row_totals != 0)
+    f1 = np.divide(2 * precision * recall, precision + recall, out=np.zeros(3, dtype=float), where=(precision + recall) != 0)
+    accuracy = float(diagonal.sum() / total) if total else 0.0
+    macro_f1 = float(f1.mean())
+    weighted_f1 = float(np.average(f1, weights=row_totals)) if total else 0.0
+
+    lines = [
+        "## Independent recalculation from the confusion matrix",
+        "",
+        f"I used {total:,} labeled rows. Matrix rows are actual classes and columns are predicted classes, ordered Low, Medium, High.",
+        "",
+        "| Actual class | Correct | Support | Precision | Recall | F1 |",
+        "|---|---:|---:|---:|---:|---:|",
+    ]
+    for i, name in enumerate(CLASSES):
+        lines.append(
+            f"| {name} | {int(diagonal[i])} | {int(row_totals[i])} | {precision[i]:.4f} | {recall[i]:.4f} | {f1[i]:.4f} |"
+        )
+    lines.extend([
+        "",
+        f"- Accuracy = diagonal total / all rows = {int(diagonal.sum())} / {total} = **{accuracy:.4f} ({accuracy:.1%})**.",
+        f"- Macro-F1 = unweighted mean of the three class F1 scores = **{macro_f1:.4f}**.",
+        f"- Weighted-F1 = mean of class F1 scores weighted by each class support = **{weighted_f1:.4f}**.",
+        "",
+        "### Comparison with the app's reported metrics",
+    ])
+    comparisons = [
+        ("Accuracy", accuracy, evaluation["accuracy"]),
+        ("Macro-F1", macro_f1, evaluation["macro_f1"]),
+        ("Weighted-F1", weighted_f1, evaluation["weighted_f1"]),
+    ]
+    for name, recalculated, reported in comparisons:
+        difference = recalculated - float(reported)
+        matches = abs(difference) < 1e-9
+        lines.append(
+            f"- {name}: recalculated {recalculated:.4f}; reported {float(reported):.4f}; "
+            f"difference {difference:+.6f} — {'matches' if matches else 'does not match'} before display rounding."
+        )
+    lines.extend([
+        "",
+        "This checks the arithmetic independently from the confusion-matrix counts. It does not provide a new test of the model: both calculations use the same uploaded labeled rows.",
+    ])
+    return "\n".join(lines)
+
+
+def response_is_incomplete(answer: str, finish_reason: str = "") -> bool:
+    """Catch token-limited and visibly cut-off Gemini replies before display."""
+    if "MAX_TOKENS" in finish_reason.upper():
+        return True
+    text = answer.rstrip()
+    if not text:
+        return True
+    if text.count("```") % 2 or text.count("**") % 2:
+        return True
+    return bool(re.search(r"(?:[,;:]|\b(?:and|or|with|because|including|such as))\s*$", text, flags=re.IGNORECASE))
+
+
 def is_column_question(question: str) -> bool:
     q = question.lower()
     return any(term in q for term in ["column", "columns", "field names", "schema", "headers", "variables"])
@@ -669,6 +750,8 @@ def llm_answer(question: str, results: list[dict], context: list[tuple[str, floa
     if is_column_question(question):
         answer = deterministic_answer(question, results, context, df)
         return answer, "Column names read directly from the uploaded CSV header; Gemini was not used."
+    if is_metric_verification_question(question):
+        return independently_recalculate_metrics(df), "Metrics recalculated locally from confusion-matrix counts and compared with the app's reported values; Gemini was not used for arithmetic."
     if not allow_llm:
         return format_requested_answer(deterministic_answer(question, results, context, df), question, df, previous_question), "Gemini is off; no user question or uploaded data was sent to an external LLM."
     if not api_key:
@@ -717,8 +800,11 @@ Retrieved project notes:
             config=types.GenerateContentConfig(temperature=0.2, max_output_tokens=1800),
         )
         answer = (response.text or "").strip()
-        if not answer:
-            raise RuntimeError("The language model returned an empty answer.")
+        candidates = getattr(response, "candidates", None) or []
+        finish_reason = str(getattr(candidates[0], "finish_reason", "")) if candidates else ""
+        if response_is_incomplete(answer, finish_reason):
+            fallback = format_requested_answer(deterministic_answer(question, results, context, df), question, df, previous_question)
+            return fallback, "Gemini returned an incomplete answer; showing the complete data-grounded local response instead."
         generated_lines = [line for line in answer.splitlines() if line.strip()]
         formatted = format_requested_answer(answer, question, df, previous_question)
         status = "Gemini generated this explanation from aggregate results and retrieved project notes."
