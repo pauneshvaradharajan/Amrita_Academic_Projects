@@ -360,7 +360,7 @@ def choose_tools(question: str, df: pd.DataFrame) -> list[str]:
         tools.append("model_performance")
     if any(x in q for x in ["error", "mistake", "wrong", "confus", "misclassif"]):
         tools.append("error_analysis")
-    if any(x in q for x in ["plot", "chart", "graph", "visual", "histogram", "hist plot", "show me"]):
+    if any(x in q for x in ["plot", "chart", "graph", "visual", "histogram", "hist plot", "show me"]) or wants_confusion(question):
         tools.append("visualization")
     if any(x in q for x in ["recommend", "action", "what should", "improve", "next step", "decision", "suggest", "limitation", "weakness", "reliable", "trust"]):
         tools.append("recommendations")
@@ -371,9 +371,19 @@ def choose_tools(question: str, df: pd.DataFrame) -> list[str]:
     return list(dict.fromkeys(tools))
 
 
+def wants_confusion(question: str) -> bool:
+    q = question.lower()
+    return any(term in q for term in ["confusion matrix", "error matrix", "misclass", "most common mistake", "common mistakes"])
+
+
+def is_error_analysis_question(question: str) -> bool:
+    q = question.lower()
+    return any(term in q for term in ["mistake", "error", "confusion", "misclass"])
+
+
 def wants_plot(question: str) -> bool:
     q = question.lower()
-    return any(term in q for term in ["plot", "chart", "graph", "visual", "histogram", "hist plot"])
+    return any(term in q for term in ["plot", "chart", "graph", "visual", "histogram", "hist plot"]) or wants_confusion(question)
 
 
 def wants_table(question: str) -> bool:
@@ -456,11 +466,13 @@ def make_question_plot(question: str, df: pd.DataFrame):
     """Build a real plot from uploaded fields; fall back to valid class counts."""
     q = question.lower()
     summary = summarize_data(df)
-    if summary.get("evaluation") and any(word in q for word in ["confusion", "misclass", "error matrix"]):
+    if wants_confusion(question):
+        if not summary.get("evaluation"):
+            return None, "A confusion matrix needs actual labels as well as predicted labels; this file does not provide both."
         cm = pd.DataFrame(summary["evaluation"]["confusion_matrix"], index=CLASSES, columns=CLASSES)
         fig = px.imshow(cm, text_auto=True, x=CLASSES, y=CLASSES, color_continuous_scale="Blues",
                         labels={"x": "Predicted", "y": "Actual", "color": "Sessions"}, title="Confusion matrix")
-        return fig, "Counts use rows with both actual and predicted labels."
+        return fig, "Rows are actual classes; columns are predicted classes. Diagonal cells are correct predictions; off-diagonal cells are mistakes."
 
     if "timestamp" in df and df["timestamp"].notna().any() and any(word in q for word in ["time", "trend", "over time", "timeline"]):
         dated = df.dropna(subset=["timestamp"]).copy()
@@ -497,6 +509,12 @@ def make_question_table(question: str, df: pd.DataFrame) -> pd.DataFrame:
     """Return a safe aggregate table, never raw participant/session records."""
     summary = summarize_data(df)
     q = question.lower()
+    if wants_confusion(question):
+        if not summary.get("evaluation"):
+            return pd.DataFrame({"Status": ["Cannot calculate confusion matrix: actual and predicted labels are both required."]})
+        matrix = pd.DataFrame(summary["evaluation"]["confusion_matrix"], index=CLASSES, columns=CLASSES)
+        matrix.index.name = "Actual \\ Predicted"
+        return matrix.reset_index()
     if summary.get("evaluation") and any(word in q for word in ["performance", "metric", "accuracy", "f1", "precision", "recall"]):
         ev = summary["evaluation"]
         return pd.DataFrame([
@@ -598,8 +616,10 @@ def deterministic_answer(question: str, results: list[dict], context: list[tuple
             pieces.append(f"The file has {result['rows']} rows. Timestamp data is {'available' if result['timestamps_available'] else 'not available'}; confidence is {'available' if result['confidence_available'] else 'not supplied'}.")
         if result["tool"] == "error_analysis":
             if result.get("available") and result.get("largest_confusions"):
-                top = result["largest_confusions"][0]
-                pieces.append(f"The most frequent error is actual {top['actual']} predicted as {top['predicted_as']} ({top['sessions']} sessions). The confusion matrix is shown in Model evaluation.")
+                top_errors = result["largest_confusions"][:3]
+                error_text = "; ".join(f"actual {item['actual']} predicted as {item['predicted_as']}: {item['sessions']} sessions" for item in top_errors)
+                pieces.append("Most common mistakes (actual → predicted): " + error_text + ".")
+                pieces.append("In the confusion matrix, rows are actual classes, columns are predicted classes, the diagonal is correct, and off-diagonal cells are errors.")
             elif not result.get("available"):
                 pieces.append(result["note"])
         if result["tool"] == "visualization" and wants_plot(question):
@@ -651,6 +671,9 @@ def llm_answer(question: str, results: list[dict], context: list[tuple[str, floa
         return format_requested_answer(deterministic_answer(question, results, context, df), question, df, previous_question), "Gemini is off; no user question or uploaded data was sent to an external LLM."
     if not api_key:
         return format_requested_answer(deterministic_answer(question, results, context, df), question, df, previous_question), "No GEMINI_API_KEY is configured; showing the data-grounded explanation without an LLM."
+    if is_error_analysis_question(question):
+        answer = format_requested_answer(deterministic_answer(question, results, context, df), question, df, previous_question)
+        return answer, "Error counts and the confusion matrix are calculated directly from the uploaded actual and predicted labels; no generative metric estimates are used."
     try:
         from google import genai
         from google.genai import types
@@ -847,7 +870,7 @@ if question:
     history.append({
         "role": "assistant", "content": answer, "tools": tools_used,
         "sources": sources, "status": llm_status, "question": question,
-        "plot_requested": wants_plot(question), "table_requested": wants_table(question),
+        "plot_requested": wants_plot(question), "table_requested": wants_table(question) or wants_confusion(question),
     })
 
 for i, message in enumerate(st.session_state.get("chat_history", [])):
@@ -856,8 +879,11 @@ for i, message in enumerate(st.session_state.get("chat_history", [])):
         if message["role"] == "assistant":
             if message.get("plot_requested"):
                 figure, plot_note = make_question_plot(message.get("question", ""), data)
-                st.plotly_chart(figure, width="stretch", key=f"chat_plot_{i}")
-                st.caption(plot_note)
+                if figure is not None:
+                    st.plotly_chart(figure, width="stretch", key=f"chat_plot_{i}")
+                    st.caption(plot_note)
+                else:
+                    st.info(plot_note)
             if message.get("table_requested"):
                 st.markdown("**Aggregate results**")
                 table = make_question_table(message.get("question", ""), data)
