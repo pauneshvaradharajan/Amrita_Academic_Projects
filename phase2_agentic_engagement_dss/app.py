@@ -28,28 +28,6 @@ ORIGINAL_TO_GROUPED = {0: "Low", 1: "Low", 2: "Medium", 3: "High", 4: "High"}
 st.set_page_config(page_title="MultiPENG Engagement Decision Support", page_icon="🧠", layout="wide")
 
 
-def make_demo_data(seed: int = 42) -> pd.DataFrame:
-    """Create clearly labelled fictional sessions for a safe first-time demo."""
-    rng = np.random.default_rng(seed)
-    labels = np.array(["Low"] * 10 + ["Medium"] * 16 + ["High"] * 64)
-    rng.shuffle(labels)
-    rows = []
-    for i, label in enumerate(labels):
-        participant = f"Demo-P{i % 18 + 1:02d}"
-        session_number = i // 18 + 1
-        rows.append({
-            "participant_id": participant,
-            "session_id": f"D{i + 1:03d}",
-            "session_number": session_number,
-            "timestamp": pd.Timestamp("2026-01-01") + pd.Timedelta(days=int(i)),
-            "game": "Fictional Demo Game",
-            "difficulty": ["Easy", "Medium", "Hard"][i % 3],
-            "predicted_engagement": label,
-            "confidence": float(rng.uniform(0.55, 0.98)),
-        })
-    return pd.DataFrame(rows)
-
-
 def canonical_class(value: object) -> str:
     text = str(value).strip().lower()
     text = re.sub(r"[^a-z0-9]+", "", text)
@@ -767,7 +745,6 @@ st.markdown("""
   .block-container div[data-testid="stHorizontalBlock"] button { background:#fff !important; color:#35373b !important; border:1px solid #e5e5e6 !important; min-height:4.5rem; white-space:normal; text-align:left; }
   .suggestion { min-height:4.6rem; white-space:normal; text-align:left; color:#45484d; background:#fff; border:1px solid #e5e5e6; border-radius:16px; }
   [data-testid="stMetric"] { background:#fafafa; border:1px solid #ededee; border-radius:13px; padding:.75rem .9rem; }
-  .demo-note { background:#fff8e6; border:1px solid #f0dfb3; border-radius:10px; padding:.65rem .8rem; color:#66551f; font-size:.82rem; }
   .footnote { color:#333 !important; font-size:.76rem; text-align:center; padding:1rem 0 0; }
   .stApp input, .stApp textarea, .stApp [role="radiogroup"], .stApp [role="switch"] { color:#111 !important; }
   .stApp [data-testid="stExpander"] summary, .stApp [data-testid="stTabs"] button { color:#111 !important; }
@@ -783,12 +760,8 @@ with st.sidebar:
         st.rerun()
     st.divider()
     st.markdown("**Workspace data**")
-    data_mode = st.radio("Data source", ["Fictional demo data", "Upload Phase 1 predictions"], index=0, label_visibility="collapsed")
-    if data_mode == "Upload Phase 1 predictions":
-        uploaded = st.file_uploader("Prediction summary CSV", type=["csv"], help="Upload session-level predictions only. Do not upload raw EEG, face, eye, or HR recordings to this public demo.")
-        st.caption("Files stay in this app session and are not saved to the repository.")
-    else:
-        uploaded = None
+    uploaded = st.file_uploader("Upload Phase 1 predictions", type=["csv"], help="Upload session-level predictions only. Do not upload raw EEG, face, eye, or HR recordings to this public demo.")
+    st.caption("Files stay in this app session and are not saved to the repository.")
     allow_llm = st.toggle(
         "Enable Gemini responses", value=False,
         help="When enabled, your question, aggregate counts and retrieved project notes are sent to Google Gemini. Session rows, participant IDs and raw sensor features are excluded.",
@@ -805,42 +778,31 @@ with st.sidebar:
         st.caption("Local analysis and retrieval are active. Gemini is off.")
 
 try:
-    if data_mode == "Upload Phase 1 predictions" and uploaded is not None:
+    if uploaded is not None:
         data = load_prediction_csv(uploaded)
         signature = hashlib.sha256(uploaded.getvalue()).hexdigest()
         if st.session_state.get("dataset_signature") not in {None, signature}:
             st.session_state.pop("chat_history", None)
         st.session_state["dataset_signature"] = signature
         st.session_state["dataset"] = data
-        st.session_state["is_demo"] = False
-    elif data_mode == "Upload Phase 1 predictions":
+    else:
         data = pd.DataFrame(columns=["participant_id", "session_id", "predicted_engagement"])
         if st.session_state.get("dataset_signature") not in {None, "upload-empty"}:
             st.session_state.pop("chat_history", None)
         st.session_state["dataset_signature"] = "upload-empty"
         st.session_state["dataset"] = data
-        st.session_state["is_demo"] = False
-    else:
-        data = make_demo_data()
-        if st.session_state.get("dataset_signature") not in {None, "fictional-demo"}:
-            st.session_state.pop("chat_history", None)
-        st.session_state["dataset_signature"] = "fictional-demo"
-        st.session_state["dataset"] = data
-        st.session_state["is_demo"] = True
 except Exception as exc:
     st.error(f"Could not load the prediction file: {exc}")
     st.stop()
 
 summary = summarize_data(data)
-if st.session_state.get("is_demo", False):
-    st.sidebar.markdown('<div class="demo-note">Demo workspace uses fictional sessions, not actual MultiPENG participant results.</div>', unsafe_allow_html=True)
-
-if data_mode == "Upload Phase 1 predictions" and uploaded is None and data.empty:
+if uploaded is None:
     st.info("Upload your Phase 1 session-prediction CSV in the sidebar to begin. The app needs a predicted engagement column; actual labels are needed to calculate performance metrics.")
+    st.stop()
 
 st.markdown('<div class="welcome"><h1>What would you like to understand?</h1><p>Ask about engagement patterns, model outputs, or the evidence behind them.</p></div>', unsafe_allow_html=True)
 
-if not st.session_state.get("chat_history"):
+if not data.empty and not st.session_state.get("chat_history"):
     if summary.get("evaluation"):
         suggestions = [
             "Compare actual and predicted classes",
