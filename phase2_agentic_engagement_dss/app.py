@@ -44,7 +44,8 @@ def load_prediction_csv(file) -> pd.DataFrame:
     raw = pd.read_csv(file, low_memory=False)
     if raw.empty:
         raise ValueError("The uploaded CSV has no session rows.")
-    raw.columns = [str(c).strip().lower() for c in raw.columns]
+    source_columns = [str(c).strip() for c in raw.columns]
+    raw.columns = [name.lower() for name in source_columns]
     aliases = {
         "participant_id": ["participant_id", "participant", "subject_id", "player_id"],
         "session_id": ["session_id", "submission_id", "session", "submission"],
@@ -119,6 +120,9 @@ def load_prediction_csv(file) -> pd.DataFrame:
         raw["confidence"] = raw["confidence"].clip(0, 1)
     if "timestamp" in raw.columns:
         raw["timestamp"] = pd.to_datetime(raw["timestamp"], errors="coerce")
+    # Preserve the exact CSV headers separately from helper/normalized columns
+    # added by the loader so schema questions report only what was uploaded.
+    raw.attrs["source_columns"] = source_columns
     return raw
 
 
@@ -299,6 +303,7 @@ def run_analysis_tool(tool_name: str, df: pd.DataFrame) -> dict:
         return {
             "tool": tool_name,
             "rows": int(len(df)),
+            "source_columns": list(df.attrs.get("source_columns", df.columns.tolist())),
             "duplicate_sessions": int(df.duplicated(subset=duplicate_keys).sum()) if duplicate_keys else None,
             "missing_predictions": int(df["predicted_engagement"].isna().sum()),
             "missing_actual_labels": int(df["actual_engagement"].isna().sum()) if "actual_engagement" in df else int(len(df)),
@@ -342,7 +347,7 @@ def choose_tools(question: str, df: pd.DataFrame) -> list[str]:
         tools.append("visualization")
     if any(x in q for x in ["recommend", "action", "what should", "improve", "next step", "decision", "suggest", "limitation", "weakness", "reliable", "trust"]):
         tools.append("recommendations")
-    if any(x in q for x in ["quality", "missing", "duplicate", "available", "data", "file", "confidence", "timestamp"]):
+    if any(x in q for x in ["quality", "missing", "duplicate", "available", "data", "file", "column", "field", "schema", "header", "confidence", "timestamp"]):
         tools.append("data_quality")
     if broad_analysis:
         tools.extend(["data_quality", "recommendations"])
@@ -357,6 +362,11 @@ def wants_confusion(question: str) -> bool:
 def is_error_analysis_question(question: str) -> bool:
     q = question.lower()
     return any(term in q for term in ["mistake", "error", "confusion", "misclass"])
+
+
+def is_column_question(question: str) -> bool:
+    q = question.lower()
+    return any(term in q for term in ["column", "columns", "field names", "schema", "headers", "variables"])
 
 
 def wants_plot(question: str) -> bool:
@@ -521,7 +531,12 @@ def deterministic_answer(question: str, results: list[dict], context: list[tuple
     recommendation_question = any(x in q for x in ["recommend", "action", "what should", "improve", "next step", "decision", "suggest", "limitation", "weakness"])
     assistant_question = any(x in q for x in ["rag", "llm", "gemini", "agent", "where do you get", "how do you answer", "how does this work", "how are answers"])
     capability_question = any(x in q for x in ["what can you do", "what all can you do", "list out what", "list what you can", "list all", "list everything", "list the things you can"])
-    if capability_question:
+    if is_column_question(question):
+        source_columns = list(df.attrs.get("source_columns", [])) or [str(column) for column in df.columns]
+        pieces.append(f"The uploaded CSV contains {len(source_columns)} source columns:")
+        pieces.extend(f"- `{column}`" for column in source_columns)
+        pieces.append("These are the original CSV headers; helper columns added internally by the app are not included.")
+    elif capability_question:
         pieces.append("I can help with these tasks using the current prediction file:")
         pieces.extend([
             "- Summarize predicted engagement counts and percentages.",
@@ -605,7 +620,7 @@ def deterministic_answer(question: str, results: list[dict], context: list[tuple
     if context and not performance_question and not assistant_question:
         pieces.append("Project reference consulted: " + context[0][0].splitlines()[0].lstrip("# ") + ".")
     pieces.append("These are model outputs, not ground truth or clinical conclusions.")
-    separator = "\n\n" if wants_bullets(question) else " "
+    separator = "\n\n" if wants_bullets(question) or is_column_question(question) else " "
     return separator.join(pieces)
 
 
@@ -645,6 +660,9 @@ def llm_answer(question: str, results: list[dict], context: list[tuple[str, floa
     except Exception:
         api_key = os.getenv("GEMINI_API_KEY", "")
         model_name = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+    if is_column_question(question):
+        answer = deterministic_answer(question, results, context, df)
+        return answer, "Column names read directly from the uploaded CSV header; Gemini was not used."
     if not allow_llm:
         return format_requested_answer(deterministic_answer(question, results, context, df), question, df, previous_question), "Gemini is off; no user question or uploaded data was sent to an external LLM."
     if not api_key:
