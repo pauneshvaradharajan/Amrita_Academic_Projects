@@ -385,7 +385,13 @@ def wants_bullets(question: str) -> bool:
 
 
 def requested_line_count(question: str) -> int | None:
-    match = re.search(r"\b(?:in|exactly|give me)?\s*(\d{1,2})\s+lines?\b", question.lower())
+    # Users ask for fixed-size answers in several natural ways ("10 points",
+    # "5 bullets", "3 steps"). Treat them alike so a truncated/prose LLM
+    # answer can be replaced with a complete, evidence-grounded list.
+    match = re.search(
+        r"\b(?:in|exactly|give me)?\s*(\d{1,2})\s+(?:lines?|points?|items?|bullets?|steps?)\b",
+        question.lower(),
+    )
     return min(int(match.group(1)), 30) if match else None
 
 
@@ -678,7 +684,7 @@ def llm_answer(question: str, results: list[dict], context: list[tuple[str, floa
         kb = "\n\n".join(f"[Source {i + 1}] {chunk}" for i, (chunk, _) in enumerate(context)) or "No matching project source was retrieved."
         payload = json.dumps(results, ensure_ascii=False, default=str)
         line_count = requested_line_count(question)
-        line_instruction = (f"The user requested exactly {line_count} lines: return exactly {line_count} separate numbered lines, one complete point per line, with no extra introduction or conclusion." if line_count else "Follow any requested response format exactly.")
+        line_instruction = (f"The user requested exactly {line_count} list items: return exactly {line_count} complete numbered items, one per line, with no extra introduction or conclusion." if line_count else "Follow any requested response format exactly.")
         prompt = f"""You are the MultiPENG research decision-support assistant. Give a clear, natural answer in simple English, directly addressing the question. Use the available analysis tools like an analyst: explain what the numbers mean, highlight useful comparisons, and give practical next steps only when the evidence supports them.
 
 Evidence rules:
@@ -705,7 +711,10 @@ Retrieved project notes:
         response = client.models.generate_content(
             model=model_name,
             contents=prompt,
-            config=types.GenerateContentConfig(temperature=0.2, max_output_tokens=700),
+            # 700 tokens was too low for detailed answers and could leave a
+            # response ending mid-sentence. The formatter below also validates
+            # fixed-size lists and replaces incomplete ones with computed facts.
+            config=types.GenerateContentConfig(temperature=0.2, max_output_tokens=1800),
         )
         answer = (response.text or "").strip()
         if not answer:
