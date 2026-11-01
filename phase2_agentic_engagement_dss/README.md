@@ -32,4 +32,4 @@ The app does not create or display fictional sessions. The default Phase 1 refer
 
 ## Current experiment context
 
-The current Phase 1 model-selection run covers 873 sessions from 38 participants. Nested participant-grouped OOF metrics: 68.50% accuracy, 0.376 Macro-F1, 0.626 Weighted-F1, 0.377 balanced accuracy, and 0.124 MCC. Majority-only accuracy is 71.02%, so this run has not improved accuracy over the baseline; Low and Medium recall are weak. It is not an independent test result. Update `phase1_reference.json`, the saved plots, and `knowledge_base.md` together whenever validated Phase 1 results change.
+The current Phase 1 model-selection run covers 873 sessions from 38 participants. Nested participant-grouped OOF metrics: 65.75% accuracy, 0.371 Macro-F1, 0.614 Weighted-F1, 0.372 balanced accuracy, and 0.096 MCC. Majority-only accuracy is 71.02%, so this run has not improved accuracy over the baseline; Low and Medium recall remain weak. It is not an independent test result. Update `phase1_reference.json`, the saved plots, and `knowledge_base.md` together whenever validated Phase 1 results change.

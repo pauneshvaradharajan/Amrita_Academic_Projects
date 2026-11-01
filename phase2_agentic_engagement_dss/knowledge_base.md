@@ -11,7 +11,7 @@ The current Phase 1 reference covers 873 sessions from 38 participants and is in
 
 The experiment used nested 5-fold participant-grouped out-of-fold evaluation with 3 inner folds for candidate selection. It evaluated RBF-SVM and Random Forest with training-fold-only class weighting and random oversampling options. It used fold-fitted cleaning, imputation, scaling, and ANOVA selection of the top 50% of features per modality. The gated four-encoder MLP was defined but not executed in this CPU run. This is cross-validation evidence, not an untouched final test.
 
-Pooled results: accuracy 68.50%, Macro-F1 0.376, Weighted-F1 0.626, balanced accuracy 0.377, and MCC 0.124. The majority-only accuracy reference is 71.02%; therefore the model did not improve accuracy over that reference. Macro-F1 and balanced accuracy are higher than the majority reference, but Low recall is 0.113, Medium recall is 0.096, and High recall is 0.923. The main observed limitation remains weak minority-class recognition.
+Pooled results: accuracy 65.75%, Macro-F1 0.371, Weighted-F1 0.614, balanced accuracy 0.372, and MCC 0.096. The majority-only accuracy reference is 71.02%; therefore the model did not improve accuracy over that reference. Macro-F1 and balanced accuracy are higher than the majority reference, but Low recall is 0.134, Medium recall is 0.103, and High recall is 0.879. The main observed limitation remains weak minority-class recognition.
 
 The app should calculate metrics from the current aggregate confusion counts or an uploaded prediction file and distinguish this participant-grouped out-of-fold estimate from an independent test score. The earlier 60.1% grouped SVM and 73.8% session-random results are historical and must not be presented as the current result.
 

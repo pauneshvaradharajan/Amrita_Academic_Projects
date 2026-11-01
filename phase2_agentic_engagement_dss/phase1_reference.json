@@ -17,40 +17,57 @@
     "RBF-SVM",
     "Random Forest"
   ],
-  "imbalance_strategy": "Training-fold-only comparison of class weighting and random oversampling.",
+  "selected_model_by_fold": {
+    "1": "SVM oversampled C=1",
+    "2": "SVM oversampled C=1",
+    "3": "SVM oversampled C=1",
+    "4": "SVM oversampled C=1",
+    "5": "SVM oversampled C=1"
+  },
+  "imbalance_strategy": "Training-fold-only comparison; the selected outer-fold model used random oversampling within training data.",
   "feature_selection": "ANOVA top 50% per modality, fitted inside each training fold",
   "preprocessing": "training-fold-only invalid/constant/duplicate removal, median imputation, standard scaling",
-  "neural_model_status": "The gated four-encoder MLP was defined but not executed in this CPU run.",
+  "neural_model_status": "The gated four-encoder MLP was defined but not executed in the CPU run.",
   "overall_metrics": {
     "System": "Nested grouped model-selection procedure",
     "Sessions": 873,
-    "Accuracy": 0.6849942726231386,
-    "Macro-F1": 0.3757402706482297,
-    "Weighted-F1": 0.6262148429036364,
-    "Micro-F1": 0.6849942726231386,
-    "Balanced accuracy": 0.3773788510569355,
-    "MCC": 0.1239264955190279
+    "Accuracy": 0.6575028636884307,
+    "Macro-F1": 0.37100396038416644,
+    "Weighted-F1": 0.6137772043009663,
+    "Micro-F1": 0.6575028636884307,
+    "Balanced accuracy": 0.37187232639510653,
+    "MCC": 0.09636297757401821
+  },
+  "majority_reference_metrics": {
+    "System": "Majority-only reference",
+    "Sessions": 873,
+    "Accuracy": 0.7101947308132875,
+    "Macro-F1": 0.27684751060504575,
+    "Weighted-F1": 0.5898469298114377,
+    "Micro-F1": 0.7101947308132875,
+    "Balanced accuracy": 0.3333333333333333,
+    "MCC": 0.0
   },
   "per_class_metrics": [
     {
       "Class": "Low (0/1)",
-      "precision": 0.3666666666666666,
-      "recall": 0.1134020618556701,
-      "f1-score": 0.1732283464566929,
+      "precision": 0.2653061224489796,
+      "recall": 0.13402061855670103,
+      "f1-score": 0.1780821917808219,
       "support": 97.0
     },
     {
       "Class": "Medium (2)",
-      "precision": 0.2142857142857142,
-      "recall": 0.0961538461538461,
-      "f1-score": 0.1327433628318584,
+      "precision": 0.1839080459770115,
+      "recall": 0.10256410256410256,
+      "f1-score": 0.13168724279835392,
       "support": 156.0
     },
     {
       "Class": "High (3/4)",
-      "precision": 0.7399741267787839,
-      "recall": 0.9225806451612903,
-      "f1-score": 0.8212491026561378,
+      "precision": 0.7394843962008141,
+      "recall": 0.8790322580645161,
+      "f1-score": 0.8032424465733236,
       "support": 620.0
     }
   ],
@@ -62,89 +79,89 @@
     ],
     "rows_actual_columns_predicted": [
       [
-        11,
-        20,
-        66
-      ],
-      [
-        6,
-        15,
-        135
-      ],
-      [
         13,
-        35,
-        572
+        20,
+        64
+      ],
+      [
+        12,
+        16,
+        128
+      ],
+      [
+        24,
+        51,
+        545
       ]
     ]
   },
   "class_counts_actual": {
-    "Low": 97,
-    "Medium": 156,
-    "High": 620
+    "Low (0/1)": 97,
+    "Medium (2)": 156,
+    "High (3/4)": 620
   },
   "fold_metrics": [
     {
       "Fold": 1,
       "Selected model": "SVM oversampled C=1",
       "Selected balance": "random_oversampling",
-      "Best inner Macro-F1": 0.3049849171967879,
+      "Best inner Macro-F1": 0.321,
       "Accuracy": 0.7074468085106383,
-      "Macro-F1": 0.4395520765383779,
+      "Macro-F1": 0.43955207653837797,
       "Weighted-F1": 0.6546664862389142,
       "Balanced accuracy": 0.4405023517618938,
       "MCC": 0.2608790550394365
     },
     {
       "Fold": 2,
-      "Selected model": "RF unweighted",
-      "Selected balance": "none",
-      "Best inner Macro-F1": 0.3113989811626693,
-      "Accuracy": 0.7080745341614907,
-      "Macro-F1": 0.2773722627737226,
-      "Weighted-F1": 0.6047059890284263,
-      "Balanced accuracy": 0.3247863247863248,
-      "MCC": -0.0275951960837386
+      "Selected model": "SVM oversampled C=1",
+      "Selected balance": "random_oversampling",
+      "Best inner Macro-F1": 0.344,
+      "Accuracy": 0.6770186335403726,
+      "Macro-F1": 0.34612403100775196,
+      "Weighted-F1": 0.6187755789879147,
+      "Balanced accuracy": 0.37270137270137266,
+      "MCC": 0.08463760975259772
     },
     {
       "Fold": 3,
       "Selected model": "SVM oversampled C=1",
       "Selected balance": "random_oversampling",
-      "Best inner Macro-F1": 0.3047431444045675,
+      "Best inner Macro-F1": 0.336,
       "Accuracy": 0.5865921787709497,
-      "Macro-F1": 0.4173727066584209,
+      "Macro-F1": 0.41737270665842097,
       "Weighted-F1": 0.5806471395058787,
-      "Balanced accuracy": 0.4177751541387904,
-      "MCC": 0.1442928115001842
+      "Balanced accuracy": 0.41777515413879046,
+      "MCC": 0.14429281150018425
     },
     {
       "Fold": 4,
-      "Selected model": "SVM unweighted C=2",
-      "Selected balance": "none",
-      "Best inner Macro-F1": 0.3495113065826304,
-      "Accuracy": 0.7375,
-      "Macro-F1": 0.2839951865222623,
-      "Weighted-F1": 0.6336642599277978,
-      "Balanced accuracy": 0.330532212885154,
-      "MCC": 0.0193966834767308
+      "Selected model": "SVM oversampled C=1",
+      "Selected balance": "random_oversampling",
+      "Best inner Macro-F1": 0.395,
+      "Accuracy": 0.61875,
+      "Macro-F1": 0.2568093385214008,
+      "Weighted-F1": 0.5730058365758756,
+      "Balanced accuracy": 0.2773109243697479,
+      "MCC": -0.12839975737540854
     },
     {
       "Fold": 5,
       "Selected model": "SVM oversampled C=1",
       "Selected balance": "random_oversampling",
-      "Best inner Macro-F1": 0.3586311174708558,
+      "Best inner Macro-F1": 0.343,
       "Accuracy": 0.6918918918918919,
-      "Macro-F1": 0.2934686442883163,
+      "Macro-F1": 0.29346864428831637,
       "Weighted-F1": 0.6026989049939869,
-      "Balanced accuracy": 0.3308080808080808,
-      "MCC": 0.0606845822779825
+      "Balanced accuracy": 0.33080808080808083,
+      "MCC": 0.06068458227798256
     }
   ],
   "confusion_counts": [
     {
       "actual": "Low (0/1)",
       "predicted": "Low (0/1)",
-      "sessions": 11
+      "sessions": 13
     },
     {
       "actual": "Low (0/1)",
@@ -154,38 +171,38 @@
     {
       "actual": "Low (0/1)",
       "predicted": "High (3/4)",
-      "sessions": 66
+      "sessions": 64
     },
     {
       "actual": "Medium (2)",
       "predicted": "Low (0/1)",
-      "sessions": 6
+      "sessions": 12
     },
     {
       "actual": "Medium (2)",
       "predicted": "Medium (2)",
-      "sessions": 15
+      "sessions": 16
     },
     {
       "actual": "Medium (2)",
       "predicted": "High (3/4)",
-      "sessions": 135
+      "sessions": 128
     },
     {
       "actual": "High (3/4)",
       "predicted": "Low (0/1)",
-      "sessions": 13
+      "sessions": 24
     },
     {
       "actual": "High (3/4)",
       "predicted": "Medium (2)",
-      "sessions": 35
+      "sessions": 51
     },
     {
       "actual": "High (3/4)",
       "predicted": "High (3/4)",
-      "sessions": 572
+      "sessions": 545
     }
   ],
-  "source_artifacts": "The values and PNG plots in this package are copied from the executed Phase 1 notebook output."
+  "source_artifacts": "Metrics recomputed from the saved Phase 1 out-of-fold prediction CSV; plots are copied from the same notebook run."
 }
