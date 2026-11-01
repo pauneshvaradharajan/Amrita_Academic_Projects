@@ -1230,6 +1230,11 @@ def llm_answer(question: str, results: list[dict], context: list[tuple[str, floa
         return independently_recalculate_metrics(df), "Metrics recalculated locally from confusion-matrix counts and compared with the app's reported values; Gemini was not used for arithmetic."
     if not allow_llm:
         return format_requested_answer(deterministic_answer(question, results, context, df), question, df, previous_question), "Gemini is off; no user question or uploaded data was sent to an external LLM."
+    if st.session_state.get("gemini_quota_exhausted", False):
+        return (
+            format_requested_answer(deterministic_answer(question, results, context, df), question, df, previous_question),
+            "Gemini quota was reached earlier in this session. This answer uses local analysis and retrieved project notes.",
+        )
     if not api_key:
         return format_requested_answer(deterministic_answer(question, results, context, df), question, df, previous_question), "No GEMINI_API_KEY is configured; showing the data-grounded explanation without an LLM."
     if is_error_analysis_question(question):
@@ -1290,7 +1295,13 @@ Retrieved project notes:
     except Exception as exc:
         diagnostic = safe_gemini_error(exc, api_key)
         logging.getLogger(__name__).warning("Gemini request failed (%s)", diagnostic)
-        return format_requested_answer(deterministic_answer(question, results, context, df), question, df, previous_question), f"Gemini request failed — {diagnostic}. Showing the data-grounded fallback."
+        lowered = diagnostic.lower()
+        if any(term in lowered for term in ("resource_exhausted", "quota", "rate limit", "http 429")):
+            st.session_state["gemini_quota_exhausted"] = True
+            status = "Gemini quota limit reached. This answer uses local analysis and retrieved project notes; the DSS is still working."
+        else:
+            status = "Gemini is temporarily unavailable. This answer uses local analysis and retrieved project notes; the DSS is still working."
+        return format_requested_answer(deterministic_answer(question, results, context, df), question, df, previous_question), status
 
 
 def run_agent(question: str, df: pd.DataFrame, allow_llm: bool, previous_question: str = "") -> tuple[str, list[str], list[tuple[str, float]], str]:
@@ -1432,6 +1443,11 @@ with st.sidebar:
         st.caption("Gemini is ready. Only your question, aggregate metrics, and retrieved project notes are sent; raw rows and IDs are excluded.")
     else:
         st.caption("Local analysis and retrieval are active. Gemini is off.")
+    if st.session_state.get("gemini_quota_exhausted", False):
+        st.warning("Gemini reached its quota in this session. The assistant will continue using local analysis and retrieved project notes.")
+        if st.button("Retry Gemini", use_container_width=True, help="Try again after the quota resets or after updating the API configuration."):
+            st.session_state["gemini_quota_exhausted"] = False
+            st.rerun()
 
 if data_source == "Phase 1 code + cell outputs":
     render_phase1_notebook_preview()
