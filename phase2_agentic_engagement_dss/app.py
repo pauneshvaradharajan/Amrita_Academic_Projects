@@ -56,6 +56,11 @@ def render_phase1_notebook_preview() -> None:
         "This is the saved executed notebook; opening this view does not rerun model training. "
         "Participant and session level prediction rows are omitted from this public preview."
     )
+    st.warning(
+        "This notebook snapshot is from the earlier local run (65.75% accuracy). "
+        "The latest Colab run reported 61.3%; these outputs have not been synchronized. "
+        "Treat this as a code walkthrough until the run versions are reconciled."
+    )
     if not PHASE1_NOTEBOOK_PREVIEW_PATH.exists():
         st.error("The saved Phase 1 notebook preview is not available in this app build.")
         return
