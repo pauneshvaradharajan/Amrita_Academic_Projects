@@ -20,6 +20,8 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 APP_DIR = Path(__file__).parent
 KB_PATH = APP_DIR / "knowledge_base.md"
+PHASE1_REFERENCE_PATH = APP_DIR / "phase1_reference.json"
+PHASE1_PLOTS_DIR = APP_DIR / "assets" / "phase1_plots"
 CLASSES = ["Low", "Medium", "High"]
 COLORS = {"Low": "#4C78A8", "Medium": "#F2A541", "High": "#59A14F"}
 CLASS_TO_ID = {name: i for i, name in enumerate(CLASSES)}
@@ -109,10 +111,6 @@ def load_prediction_csv(file) -> pd.DataFrame:
         raw["prediction_protocol"] = raw["prediction_protocol"].fillna("").astype(str)
     if "prediction_method" in raw:
         raw["prediction_method"] = raw["prediction_method"].fillna("").astype(str)
-    if "participant_id" not in raw.columns:
-        raw["participant_id"] = "Unknown"
-    if "session_id" not in raw.columns:
-        raw["session_id"] = [f"S{i + 1:04d}" for i in range(len(raw))]
     if "confidence" in raw.columns:
         raw["confidence"] = pd.to_numeric(raw["confidence"], errors="coerce")
         if raw["confidence"].dropna().gt(1).any():
@@ -126,13 +124,37 @@ def load_prediction_csv(file) -> pd.DataFrame:
     return raw
 
 
+@st.cache_data(show_spinner=False)
+def load_phase1_reference() -> pd.DataFrame:
+    """Load aggregate class-pair counts; no participant or session rows are stored here."""
+    reference = json.loads(PHASE1_REFERENCE_PATH.read_text(encoding="utf-8"))
+    rows = [{
+        "actual_engagement": item["actual"].split(" (")[0],
+        "predicted_engagement": item["predicted"].split(" (")[0],
+        "session_count": int(item["sessions"]),
+        "participant_count": int(reference["participants"]),
+        "prediction_method": "Nested grouped model selection (RBF-SVM / Random Forest)",
+        "prediction_protocol": reference["protocol"],
+    } for item in reference["confusion_counts"]]
+    data = pd.DataFrame(rows)
+    data.attrs["source_columns"] = ["actual_engagement", "predicted_engagement", "session_count"]
+    data.attrs["aggregate_reference"] = True
+    return data
+
+
 def summarize_data(df: pd.DataFrame) -> dict:
-    counts = df["predicted_engagement"].value_counts().reindex(CLASSES, fill_value=0)
+    weights = pd.to_numeric(df["session_count"], errors="coerce").fillna(0).clip(lower=0) if "session_count" in df else pd.Series(1, index=df.index, dtype=float)
+    total_sessions = int(weights.sum())
+    counts = df.assign(_weight=weights).groupby("predicted_engagement")["_weight"].sum().reindex(CLASSES, fill_value=0)
+    participant_count = (int(pd.to_numeric(df["participant_count"], errors="coerce").dropna().iloc[0])
+                         if "participant_count" in df and pd.to_numeric(df["participant_count"], errors="coerce").notna().any()
+                         else (int(df["participant_id"].nunique()) if "participant_id" in df else None))
     result = {
-        "sessions": int(len(df)),
-        "participants": int(df["participant_id"].nunique()),
+        "sessions": total_sessions,
+        "participants": participant_count,
+        "aggregate_reference": bool(df.attrs.get("aggregate_reference", False)),
         "class_counts": {k: int(v) for k, v in counts.items()},
-        "class_percent": {k: round(float(v / max(len(df), 1) * 100), 1) for k, v in counts.items()},
+        "class_percent": {k: round(float(v / max(total_sessions, 1) * 100), 1) for k, v in counts.items()},
     }
     if "confidence" in df and df["confidence"].notna().any():
         result["mean_confidence"] = round(float(df["confidence"].mean()), 3)
@@ -148,27 +170,28 @@ def summarize_data(df: pd.DataFrame) -> dict:
             result["prediction_method"] = methods[0] if len(methods) == 1 else "Multiple methods"
     valid = df.dropna(subset=["actual_engagement", "predicted_engagement"]) if "actual_engagement" in df else pd.DataFrame()
     if "actual_engagement" in df and df["actual_engagement"].notna().any():
-        actual_counts = df["actual_engagement"].value_counts().reindex(CLASSES, fill_value=0)
+        actual_counts = df.assign(_weight=weights).groupby("actual_engagement")["_weight"].sum().reindex(CLASSES, fill_value=0)
         result["actual_class_counts"] = {k: int(v) for k, v in actual_counts.items()}
-        result["actual_class_percent"] = {k: round(float(v / max(int(df["actual_engagement"].notna().sum()), 1) * 100), 1) for k, v in actual_counts.items()}
+        result["actual_class_percent"] = {k: round(float(v / max(int(weights[df["actual_engagement"].notna()].sum()), 1) * 100), 1) for k, v in actual_counts.items()}
     if len(valid):
         actual = valid["actual_engagement"].map(CLASS_TO_ID).to_numpy()
         predicted = valid["predicted_engagement"].map(CLASS_TO_ID).to_numpy()
-        summary = classification_report(actual, predicted, labels=[0, 1, 2], target_names=CLASSES, output_dict=True, zero_division=0)
-        actual_distribution = np.bincount(actual, minlength=3)
-        majority_baseline = float(actual_distribution.max() / len(actual))
+        valid_weights = weights.loc[valid.index].to_numpy(dtype=float)
+        summary = classification_report(actual, predicted, labels=[0, 1, 2], target_names=CLASSES, output_dict=True, zero_division=0, sample_weight=valid_weights)
+        actual_distribution = np.bincount(actual, weights=valid_weights, minlength=3)
+        majority_baseline = float(actual_distribution.max() / max(float(valid_weights.sum()), 1))
         majority_class = CLASSES[int(actual_distribution.argmax())]
         result["evaluation"] = {
-            "n_labeled": int(len(valid)),
-            "accuracy": float(accuracy_score(actual, predicted)),
-            "macro_f1": float(f1_score(actual, predicted, average="macro", zero_division=0)),
-            "weighted_f1": float(f1_score(actual, predicted, average="weighted", zero_division=0)),
-            "balanced_accuracy": float(balanced_accuracy_score(actual, predicted)),
-            "mcc": float(matthews_corrcoef(actual, predicted)),
+            "n_labeled": int(valid_weights.sum()),
+            "accuracy": float(accuracy_score(actual, predicted, sample_weight=valid_weights)),
+            "macro_f1": float(f1_score(actual, predicted, average="macro", zero_division=0, sample_weight=valid_weights)),
+            "weighted_f1": float(f1_score(actual, predicted, average="weighted", zero_division=0, sample_weight=valid_weights)),
+            "balanced_accuracy": float(balanced_accuracy_score(actual, predicted, sample_weight=valid_weights)),
+            "mcc": float(matthews_corrcoef(actual, predicted, sample_weight=valid_weights)),
             "majority_baseline_accuracy": majority_baseline,
             "majority_class": majority_class,
             "per_class": {name: {"precision": summary[name]["precision"], "recall": summary[name]["recall"], "f1": summary[name]["f1-score"], "support": int(summary[name]["support"])} for name in CLASSES},
-            "confusion_matrix": confusion_matrix(actual, predicted, labels=[0, 1, 2]).tolist(),
+            "confusion_matrix": confusion_matrix(actual, predicted, labels=[0, 1, 2], sample_weight=valid_weights).astype(int).tolist(),
         }
     return result
 
@@ -179,7 +202,7 @@ def create_report(df: pd.DataFrame, summary: dict) -> str:
         "",
         f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
         f"Sessions analyzed: {summary['sessions']}",
-        f"Participants represented: {summary['participants']}",
+        f"Participants represented: {summary['participants'] if summary['participants'] is not None else 'not supplied'}",
         "",
         "## Predicted engagement distribution",
     ]
@@ -214,6 +237,13 @@ def create_report(df: pd.DataFrame, summary: dict) -> str:
         lines.extend(["", f"Mean model confidence: {summary['mean_confidence']:.3f}"])
     lines.extend(["", "These are summaries of model predictions, not direct measurements of a person's internal state."])
     return "\n".join(lines)
+
+
+def missing_session_count(df: pd.DataFrame, column: str) -> int:
+    weights = pd.to_numeric(df["session_count"], errors="coerce").fillna(0) if "session_count" in df else pd.Series(1, index=df.index)
+    if column not in df:
+        return int(weights.sum())
+    return int(weights[df[column].isna()].sum())
 
 
 @st.cache_data(show_spinner=False)
@@ -258,6 +288,9 @@ def retrieve_context(question: str, k: int = 3) -> list[tuple[str, float]]:
 def run_analysis_tool(tool_name: str, df: pd.DataFrame) -> dict:
     summary = summarize_data(df)
     if tool_name == "participant_summary":
+        if "participant_id" not in df:
+            return {"tool": tool_name, "available": False,
+                    "note": "This aggregate result does not contain participant-level rows or identifiers; it reports only the overall participant count and class totals."}
         counts = df.groupby(["participant_id", "predicted_engagement"]).size().unstack(fill_value=0)
         counts = counts.reindex(columns=CLASSES, fill_value=0)
         counts["sessions"] = counts.sum(axis=1)
@@ -303,10 +336,11 @@ def run_analysis_tool(tool_name: str, df: pd.DataFrame) -> dict:
         return {
             "tool": tool_name,
             "rows": int(len(df)),
+            "sessions": int(summary["sessions"]),
             "source_columns": list(df.attrs.get("source_columns", df.columns.tolist())),
             "duplicate_sessions": int(df.duplicated(subset=duplicate_keys).sum()) if duplicate_keys else None,
-            "missing_predictions": int(df["predicted_engagement"].isna().sum()),
-            "missing_actual_labels": int(df["actual_engagement"].isna().sum()) if "actual_engagement" in df else int(len(df)),
+            "missing_predictions": missing_session_count(df, "predicted_engagement"),
+            "missing_actual_labels": missing_session_count(df, "actual_engagement"),
             "timestamps_available": bool("timestamp" in df and df["timestamp"].notna().any()),
             "confidence_available": bool("confidence" in df and df["confidence"].notna().any()),
             "note": "Missing optional fields are not imputed or invented.",
@@ -412,13 +446,23 @@ def independently_recalculate_metrics(df: pd.DataFrame) -> str:
         f"- Macro-F1 = unweighted mean of the three class F1 scores = **{macro_f1:.4f}**.",
         f"- Weighted-F1 = mean of class F1 scores weighted by each class support = **{weighted_f1:.4f}**.",
         "",
-        "### Comparison with the app's reported metrics",
     ])
-    comparisons = [
-        ("Accuracy", accuracy, evaluation["accuracy"]),
-        ("Macro-F1", macro_f1, evaluation["macro_f1"]),
-        ("Weighted-F1", weighted_f1, evaluation["weighted_f1"]),
-    ]
+    if summary.get("aggregate_reference"):
+        reported = json.loads(PHASE1_REFERENCE_PATH.read_text(encoding="utf-8"))["overall_metrics"]
+        comparisons = [
+            ("Accuracy", accuracy, float(reported["Accuracy"])),
+            ("Macro-F1", macro_f1, float(reported["Macro-F1"])),
+            ("Weighted-F1", weighted_f1, float(reported["Weighted-F1"])),
+        ]
+        comparison_title = "Comparison with the Phase 1 notebook outputs"
+    else:
+        comparisons = [
+            ("Accuracy", accuracy, evaluation["accuracy"]),
+            ("Macro-F1", macro_f1, evaluation["macro_f1"]),
+            ("Weighted-F1", weighted_f1, evaluation["weighted_f1"]),
+        ]
+        comparison_title = "Comparison with the app's reported metrics"
+    lines.append(f"### {comparison_title}")
     for name, recalculated, reported in comparisons:
         difference = recalculated - float(reported)
         matches = abs(difference) < 1e-9
@@ -480,7 +524,7 @@ def evidence_lines(df: pd.DataFrame, previous_question: str = "") -> list[str]:
     """Prepare plain-English presentation lines from computed CSV fields only."""
     summary = summarize_data(df)
     lines = [
-        f"The uploaded prediction file contains {summary['sessions']:,} sessions across {summary['participants']:,} participants.",
+        f"The current Phase 1 result covers {summary['sessions']:,} sessions and {summary['participants']:,} participants." if summary["participants"] is not None else f"The current prediction file covers {summary['sessions']:,} sessions; participant count was not supplied.",
         "Engagement is reported in three grouped classes: Low, Medium, and High.",
         "Predicted counts are " + "; ".join(f"{name}: {summary['class_counts'][name]} ({summary['class_percent'][name]:.1f}%)" for name in CLASSES) + ".",
     ]
@@ -662,7 +706,8 @@ def deterministic_answer(question: str, results: list[dict], context: list[tuple
         else:
             pieces.append("For evidence-based recommendations, upload Phase 1 predictions together with actual engagement labels. Predictions alone cannot establish accuracy or identify true errors.")
     elif class_question:
-        pieces.append(f"I analyzed {summary['sessions']} sessions from {summary['participants']} participants. Predicted engagement distribution: {distribution}.")
+        people = f"{summary['participants']} participants" if summary["participants"] is not None else "an unspecified number of participants"
+        pieces.append(f"I analyzed {summary['sessions']} sessions from {people}. Predicted engagement distribution: {distribution}.")
         if summary.get("actual_class_counts"):
             actual_distribution = ", ".join(f"{k}: {summary['actual_class_counts'][k]} ({summary['actual_class_percent'][k]}%)" for k in CLASSES)
             pieces.append(f"The actual-label distribution is {actual_distribution}. This helps distinguish the dataset's class imbalance from the model's prediction pattern.")
@@ -674,11 +719,13 @@ def deterministic_answer(question: str, results: list[dict], context: list[tuple
         elif any(x in q for x in ["attention", "weakest", "hard to predict", "error", "mistake"]):
             pieces.append("This file has no actual labels, so I cannot tell which class the model predicts poorly. The class counts show imbalance in predictions only. Upload actual labels alongside predictions to measure class-wise recall and errors.")
     elif any(x in q for x in ["data", "file", "missing", "quality", "available", "what did you"]):
-        pieces.append(f"The current file contains {summary['sessions']} sessions across {summary['participants']} participants. It contains {'actual engagement labels, so evaluation metrics can be computed' if summary.get('evaluation') else 'predictions only, so accuracy cannot be computed'}.")
+        people = f"across {summary['participants']} participants" if summary["participants"] is not None else "; participant count is not supplied"
+        pieces.append(f"The current file contains {summary['sessions']} sessions {people}. It contains {'actual engagement labels, so evaluation metrics can be computed' if summary.get('evaluation') else 'predictions only, so accuracy cannot be computed'}.")
         if summary.get("prediction_method"):
             pieces.append(f"The method recorded in the file is {summary['prediction_method']}.")
     else:
-        pieces.append(f"I reviewed {summary['sessions']} sessions across {summary['participants']} participants. The predicted distribution is {distribution}.")
+        people = f"across {summary['participants']} participants" if summary["participants"] is not None else "; participant count is not supplied"
+        pieces.append(f"I reviewed {summary['sessions']} sessions {people}. The predicted distribution is {distribution}.")
         if summary.get("evaluation"):
             ev = summary["evaluation"]
             pieces.append(f"The supplied actual labels allow an evaluation: accuracy {ev['accuracy']:.1%}, Macro-F1 {ev['macro_f1']:.3f}, and Weighted-F1 {ev['weighted_f1']:.3f}. Majority-class baseline accuracy is {ev['majority_baseline_accuracy']:.1%} ({ev['majority_class']}).")
@@ -688,12 +735,18 @@ def deterministic_answer(question: str, results: list[dict], context: list[tuple
         pieces.append(f"Recorded Phase 1 method: {summary['prediction_method']}.")
     for result in results:
         if result["tool"] == "participant_summary" and any(x in q for x in ["participant", "player", "person", "individual"]):
-            pieces.append(f"The upload represents {result['participants']} participants. This chat reports aggregate class totals and does not identify individuals; participant counts are predictions, not individual accuracy or a person's internal state.")
+            if result.get("available"):
+                pieces.append(f"The upload represents {result['participants']} participants. This chat reports aggregate class totals and does not identify individuals; participant counts are predictions, not individual accuracy or a person's internal state.")
+            else:
+                pieces.append(result["note"])
         if result["tool"] == "time_trend" and any(x in q for x in ["trend", "over time", "timeline", "change", "date"]):
             records = result.get("daily_counts", [])
             pieces.append(f"A time-trend summary uses {len(records)} dated intervals. It describes counts over time, not a causal change in engagement.")
         if result["tool"] == "data_quality" and any(x in q for x in ["quality", "missing", "duplicate", "available", "data", "file", "confidence", "timestamp"]):
-            pieces.append(f"The file has {result['rows']} rows. Timestamp data is {'available' if result['timestamps_available'] else 'not available'}; confidence is {'available' if result['confidence_available'] else 'not supplied'}.")
+            if summary.get("aggregate_reference"):
+                pieces.append(f"The current Phase 1 reference stores {result['rows']} aggregate actual/predicted class pairs representing {result['sessions']} sessions. It contains no participant or session identifiers. Timestamp data is not available; confidence values were not supplied.")
+            else:
+                pieces.append(f"The uploaded file has {result['sessions']} session records. Timestamp data is {'available' if result['timestamps_available'] else 'not available'}; confidence is {'available' if result['confidence_available'] else 'not supplied'}.")
         if result["tool"] == "error_analysis":
             if result.get("available") and result.get("largest_confusions"):
                 top_errors = result["largest_confusions"][:3]
@@ -873,8 +926,13 @@ with st.sidebar:
         st.rerun()
     st.divider()
     st.markdown("**Workspace data**")
-    uploaded = st.file_uploader("Upload Phase 1 predictions", type=["csv"], help="Upload session-level predictions only. Do not upload raw EEG, face, eye, or HR recordings to this public demo.")
-    st.caption("Files stay in this app session and are not saved to the repository.")
+    data_source = st.radio("Choose the results to analyze", ["Current Phase 1 run", "Upload another Phase 1 CSV"], index=0)
+    uploaded = None
+    if data_source == "Upload another Phase 1 CSV":
+        uploaded = st.file_uploader("Phase 1 prediction file", type=["csv"], help="Upload session-level predictions only. Do not upload raw EEG, face, eye, or HR recordings to this public app.")
+        st.caption("Uploaded files stay in this app session and are not saved to the repository.")
+    else:
+        st.caption("Loaded from the current Phase 1 run as aggregate class-pair counts. No participant or session identifiers are stored in this app.")
     allow_llm = st.toggle(
         "Enable Gemini responses", value=False,
         help="When enabled, your question, aggregate counts and retrieved project notes are sent to Google Gemini. Session rows, participant IDs and raw sensor features are excluded.",
@@ -898,6 +956,13 @@ try:
             st.session_state.pop("chat_history", None)
         st.session_state["dataset_signature"] = signature
         st.session_state["dataset"] = data
+    elif data_source == "Current Phase 1 run":
+        data = load_phase1_reference()
+        signature = "phase1-reference-2026-11-01"
+        if st.session_state.get("dataset_signature") not in {None, signature}:
+            st.session_state.pop("chat_history", None)
+        st.session_state["dataset_signature"] = signature
+        st.session_state["dataset"] = data
     else:
         data = pd.DataFrame(columns=["participant_id", "session_id", "predicted_engagement"])
         if st.session_state.get("dataset_signature") not in {None, "upload-empty"}:
@@ -910,8 +975,10 @@ except Exception as exc:
 
 summary = summarize_data(data)
 if uploaded is None:
-    st.info("Upload your Phase 1 session-prediction CSV in the sidebar to begin. The app needs a predicted engagement column; actual labels are needed to calculate performance metrics.")
-    st.stop()
+    if data_source != "Current Phase 1 run":
+        st.info("Choose the current Phase 1 results, or upload a Phase 1 prediction CSV in the sidebar. Actual labels are required to calculate performance metrics.")
+        st.stop()
+    st.success("Current Phase 1 participant-grouped cross-validation results are loaded. The app is using aggregate counts and the saved experiment plots.")
 
 st.markdown('<div class="welcome"><h1>What would you like to understand?</h1><p>Ask about engagement patterns, model outputs, or the evidence behind them.</p></div>', unsafe_allow_html=True)
 
@@ -988,7 +1055,7 @@ for i, message in enumerate(st.session_state.get("chat_history", [])):
 with st.expander("Explore analytics, records and exports"):
     metric_cols = st.columns(4)
     metric_cols[0].metric("Sessions", f"{summary['sessions']:,}")
-    metric_cols[1].metric("Participants", f"{summary['participants']:,}")
+    metric_cols[1].metric("Participants", f"{summary['participants']:,}" if summary["participants"] is not None else "Not supplied")
     metric_cols[2].metric("Most common prediction", max(summary["class_counts"], key=summary["class_counts"].get))
     metric_cols[3].metric("Mean confidence", f"{summary['mean_confidence']:.1%}" if "mean_confidence" in summary else "Not supplied")
     tab_names = ["Patterns"] + (["Model evaluation"] if summary.get("evaluation") else []) + ["Prediction records", "Export"]
@@ -1038,7 +1105,10 @@ with st.expander("Explore analytics, records and exports"):
     records_tab = tabs[2] if summary.get("evaluation") else tabs[1]
     export_tab = tabs[3] if summary.get("evaluation") else tabs[2]
     with records_tab:
-        visible_cols = [c for c in ["participant_id", "session_id", "session_number", "timestamp", "game", "difficulty", "predicted_engagement", "confidence"] if c in data.columns]
+        visible_cols = ([c for c in ["actual_engagement", "predicted_engagement", "session_count"] if c in data.columns]
+                        if summary.get("aggregate_reference") else [c for c in ["participant_id", "session_id", "session_number", "timestamp", "game", "difficulty", "actual_engagement", "predicted_engagement", "confidence"] if c in data.columns])
+        if summary.get("aggregate_reference"):
+            st.caption("Each row is an aggregate actual/predicted class pair with a count, not an individual session record.")
         st.dataframe(data[visible_cols], width="stretch", hide_index=True)
     with export_tab:
         report = create_report(data, summary)
@@ -1046,5 +1116,18 @@ with st.expander("Explore analytics, records and exports"):
         template = pd.DataFrame(columns=["participant_id", "session_id", "predicted_engagement", "confidence", "timestamp", "game", "difficulty"])
         st.download_button("Download prediction CSV template", template.to_csv(index=False), file_name="phase1_prediction_template.csv", mime="text/csv")
         st.caption("This decision-support app summarizes the uploaded Phase 1 predictions. It does not retrain or alter the Phase 1 classifier.")
+
+if summary.get("aggregate_reference"):
+    with st.expander("View the exact plots saved by the Phase 1 run", expanded=True):
+        plot_files = [
+            ("01_class_distribution.png", "Actual grouped class distribution"),
+            ("02_oof_confusion_matrix.png", "Participant-grouped out-of-fold confusion matrix"),
+            ("03_metrics_and_fold_stability.png", "Model metrics, majority reference, and fold stability"),
+            ("04_per_class_metrics.png", "Per-class precision, recall, and F1"),
+        ]
+        for filename, caption in plot_files:
+            plot_path = PHASE1_PLOTS_DIR / filename
+            if plot_path.exists():
+                st.image(str(plot_path), caption=caption, width="stretch")
 
 st.markdown('<div class="footnote">Research decision support only · predictions can be wrong · not for clinical or high-impact decisions</div>', unsafe_allow_html=True)

@@ -1,0 +1,191 @@
+{
+  "title": "MultiPENG Phase 1 participant-grouped evaluation",
+  "sessions": 873,
+  "participants": 38,
+  "classes": [
+    "Low (0/1)",
+    "Medium (2)",
+    "High (3/4)"
+  ],
+  "target_mapping": {
+    "original 0,1": "Low",
+    "original 2": "Medium",
+    "original 3,4": "High"
+  },
+  "protocol": "Nested participant-grouped 5-fold out-of-fold evaluation with 3 inner folds for model selection; not a locked independent test set.",
+  "candidate_models_evaluated": [
+    "RBF-SVM",
+    "Random Forest"
+  ],
+  "imbalance_strategy": "Training-fold-only comparison of class weighting and random oversampling.",
+  "feature_selection": "ANOVA top 50% per modality, fitted inside each training fold",
+  "preprocessing": "training-fold-only invalid/constant/duplicate removal, median imputation, standard scaling",
+  "neural_model_status": "The gated four-encoder MLP was defined but not executed in this CPU run.",
+  "overall_metrics": {
+    "System": "Nested grouped model-selection procedure",
+    "Sessions": 873,
+    "Accuracy": 0.6849942726231386,
+    "Macro-F1": 0.3757402706482297,
+    "Weighted-F1": 0.6262148429036364,
+    "Micro-F1": 0.6849942726231386,
+    "Balanced accuracy": 0.3773788510569355,
+    "MCC": 0.1239264955190279
+  },
+  "per_class_metrics": [
+    {
+      "Class": "Low (0/1)",
+      "precision": 0.3666666666666666,
+      "recall": 0.1134020618556701,
+      "f1-score": 0.1732283464566929,
+      "support": 97.0
+    },
+    {
+      "Class": "Medium (2)",
+      "precision": 0.2142857142857142,
+      "recall": 0.0961538461538461,
+      "f1-score": 0.1327433628318584,
+      "support": 156.0
+    },
+    {
+      "Class": "High (3/4)",
+      "precision": 0.7399741267787839,
+      "recall": 0.9225806451612903,
+      "f1-score": 0.8212491026561378,
+      "support": 620.0
+    }
+  ],
+  "confusion_matrix": {
+    "labels": [
+      "Low",
+      "Medium",
+      "High"
+    ],
+    "rows_actual_columns_predicted": [
+      [
+        11,
+        20,
+        66
+      ],
+      [
+        6,
+        15,
+        135
+      ],
+      [
+        13,
+        35,
+        572
+      ]
+    ]
+  },
+  "class_counts_actual": {
+    "Low": 97,
+    "Medium": 156,
+    "High": 620
+  },
+  "fold_metrics": [
+    {
+      "Fold": 1,
+      "Selected model": "SVM oversampled C=1",
+      "Selected balance": "random_oversampling",
+      "Best inner Macro-F1": 0.3049849171967879,
+      "Accuracy": 0.7074468085106383,
+      "Macro-F1": 0.4395520765383779,
+      "Weighted-F1": 0.6546664862389142,
+      "Balanced accuracy": 0.4405023517618938,
+      "MCC": 0.2608790550394365
+    },
+    {
+      "Fold": 2,
+      "Selected model": "RF unweighted",
+      "Selected balance": "none",
+      "Best inner Macro-F1": 0.3113989811626693,
+      "Accuracy": 0.7080745341614907,
+      "Macro-F1": 0.2773722627737226,
+      "Weighted-F1": 0.6047059890284263,
+      "Balanced accuracy": 0.3247863247863248,
+      "MCC": -0.0275951960837386
+    },
+    {
+      "Fold": 3,
+      "Selected model": "SVM oversampled C=1",
+      "Selected balance": "random_oversampling",
+      "Best inner Macro-F1": 0.3047431444045675,
+      "Accuracy": 0.5865921787709497,
+      "Macro-F1": 0.4173727066584209,
+      "Weighted-F1": 0.5806471395058787,
+      "Balanced accuracy": 0.4177751541387904,
+      "MCC": 0.1442928115001842
+    },
+    {
+      "Fold": 4,
+      "Selected model": "SVM unweighted C=2",
+      "Selected balance": "none",
+      "Best inner Macro-F1": 0.3495113065826304,
+      "Accuracy": 0.7375,
+      "Macro-F1": 0.2839951865222623,
+      "Weighted-F1": 0.6336642599277978,
+      "Balanced accuracy": 0.330532212885154,
+      "MCC": 0.0193966834767308
+    },
+    {
+      "Fold": 5,
+      "Selected model": "SVM oversampled C=1",
+      "Selected balance": "random_oversampling",
+      "Best inner Macro-F1": 0.3586311174708558,
+      "Accuracy": 0.6918918918918919,
+      "Macro-F1": 0.2934686442883163,
+      "Weighted-F1": 0.6026989049939869,
+      "Balanced accuracy": 0.3308080808080808,
+      "MCC": 0.0606845822779825
+    }
+  ],
+  "confusion_counts": [
+    {
+      "actual": "Low (0/1)",
+      "predicted": "Low (0/1)",
+      "sessions": 11
+    },
+    {
+      "actual": "Low (0/1)",
+      "predicted": "Medium (2)",
+      "sessions": 20
+    },
+    {
+      "actual": "Low (0/1)",
+      "predicted": "High (3/4)",
+      "sessions": 66
+    },
+    {
+      "actual": "Medium (2)",
+      "predicted": "Low (0/1)",
+      "sessions": 6
+    },
+    {
+      "actual": "Medium (2)",
+      "predicted": "Medium (2)",
+      "sessions": 15
+    },
+    {
+      "actual": "Medium (2)",
+      "predicted": "High (3/4)",
+      "sessions": 135
+    },
+    {
+      "actual": "High (3/4)",
+      "predicted": "Low (0/1)",
+      "sessions": 13
+    },
+    {
+      "actual": "High (3/4)",
+      "predicted": "Medium (2)",
+      "sessions": 35
+    },
+    {
+      "actual": "High (3/4)",
+      "predicted": "High (3/4)",
+      "sessions": 572
+    }
+  ],
+  "source_artifacts": "The values and PNG plots in this package are copied from the executed Phase 1 notebook output."
+}
