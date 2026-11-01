@@ -125,9 +125,10 @@ def load_prediction_csv(file) -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
-def load_phase1_reference() -> pd.DataFrame:
+def load_phase1_reference(reference_json: str) -> pd.DataFrame:
     """Load aggregate class-pair counts; no participant or session rows are stored here."""
-    reference = json.loads(PHASE1_REFERENCE_PATH.read_text(encoding="utf-8"))
+    # The file text is the cache key, so updated Phase 1 results cannot be hidden by a stale cache.
+    reference = json.loads(reference_json)
     rows = [{
         "actual_engagement": item["actual"].split(" (")[0],
         "predicted_engagement": item["predicted"].split(" (")[0],
@@ -957,7 +958,7 @@ try:
         st.session_state["dataset_signature"] = signature
         st.session_state["dataset"] = data
     elif data_source == "Current Phase 1 run":
-        data = load_phase1_reference()
+        data = load_phase1_reference(PHASE1_REFERENCE_PATH.read_text(encoding="utf-8"))
         signature = "phase1-reference-2026-11-01"
         if st.session_state.get("dataset_signature") not in {None, signature}:
             st.session_state.pop("chat_history", None)
