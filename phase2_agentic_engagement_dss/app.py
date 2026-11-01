@@ -1119,16 +1119,26 @@ with st.expander("Explore analytics, records and exports"):
         st.caption("This decision-support app summarizes the uploaded Phase 1 predictions. It does not retrain or alter the Phase 1 classifier.")
 
 if summary.get("aggregate_reference"):
-    with st.expander("View the exact plots saved by the Phase 1 run", expanded=True):
-        plot_files = [
-            ("01_class_distribution.png", "Actual grouped class distribution"),
-            ("02_oof_confusion_matrix.png", "Participant-grouped out-of-fold confusion matrix"),
-            ("03_metrics_and_fold_stability.png", "Model metrics, majority reference, and fold stability"),
-            ("04_per_class_metrics.png", "Per-class precision, recall, and F1"),
-        ]
-        for filename, caption in plot_files:
-            plot_path = PHASE1_PLOTS_DIR / filename
+    with st.expander("View saved Phase 1 plots (optional)", expanded=False):
+        plot_files = {
+            "Actual grouped class distribution": "01_class_distribution.png",
+            "Participant-grouped out-of-fold confusion matrix": "02_oof_confusion_matrix.png",
+            "Model metrics and fold stability": "03_metrics_and_fold_stability.png",
+            "Per-class precision, recall, and F1": "04_per_class_metrics.png",
+        }
+        selected_plot = st.selectbox(
+            "Choose a Phase 1 plot to view",
+            options=list(plot_files),
+            index=None,
+            placeholder="Select a plot…",
+            key="phase1_saved_plot_choice",
+        )
+        if selected_plot:
+            plot_path = PHASE1_PLOTS_DIR / plot_files[selected_plot]
             if plot_path.exists():
-                st.image(str(plot_path), caption=caption, width="stretch")
+                st.image(str(plot_path), caption=selected_plot, width="stretch")
+            else:
+                st.info(f"The saved plot is not available: {plot_path.name}")
 
 st.markdown('<div class="footnote">Research decision support only · predictions can be wrong · not for clinical or high-impact decisions</div>', unsafe_allow_html=True)
+
