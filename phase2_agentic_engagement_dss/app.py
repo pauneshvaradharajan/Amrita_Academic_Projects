@@ -6,6 +6,8 @@ import json
 import logging
 import os
 import re
+import uuid
+import copy
 from datetime import datetime
 from pathlib import Path
 
@@ -40,6 +42,30 @@ NOTEBOOK_CELL_PLOTS = {
 }
 
 st.set_page_config(page_title="MultiPENG Engagement Decision Support", page_icon="🧠", layout="wide")
+
+
+def save_current_conversation() -> None:
+    """Keep a session-local snapshot of the active conversation (maximum ten)."""
+    messages = st.session_state.get("chat_history", [])
+    conversation_id = st.session_state.get("active_conversation_id")
+    if not conversation_id or not any(message.get("role") == "user" for message in messages):
+        return
+    first_question = next(message.get("content", "") for message in messages if message.get("role") == "user")
+    title = " ".join(str(first_question).split())
+    if len(title) > 52:
+        title = title[:49].rstrip() + "…"
+    conversations = st.session_state.setdefault("conversation_history", [])
+    snapshot = {
+        "id": conversation_id,
+        "title": title or "Untitled conversation",
+        "messages": copy.deepcopy(messages),
+        "dataset_signature": st.session_state.get("dataset_signature"),
+        "updated_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    conversations = [item for item in conversations if item.get("id") != conversation_id]
+    conversations.append(snapshot)
+    conversations.sort(key=lambda item: item.get("updated_at", ""), reverse=True)
+    st.session_state["conversation_history"] = conversations[:10]
 
 
 def canonical_class(value: object) -> str:
@@ -1318,9 +1344,13 @@ st.markdown("""
 with st.sidebar:
     st.markdown('<div class="brand">◉ MultiPENG</div><div class="brand-sub">Engagement research assistant</div>', unsafe_allow_html=True)
     if st.button("＋  New conversation", use_container_width=True):
-        st.session_state.pop("chat_history", None)
+        save_current_conversation()
+        st.session_state["chat_history"] = []
+        st.session_state["active_conversation_id"] = uuid.uuid4().hex
+        st.session_state["recent_conversation_picker"] = None
         st.session_state.pop("suggested_question", None)
         st.rerun()
+    recent_conversations_slot = st.empty()
     st.divider()
     st.markdown("**Workspace data**")
     data_source = st.radio(
@@ -1336,6 +1366,58 @@ with st.sidebar:
         st.caption("Loaded from the current Phase 1 run as aggregate class-pair counts. No participant or session identifiers are stored in this app.")
     else:
         st.caption("Browse the saved Phase 1 notebook code and recorded cell outputs.")
+
+    # Use the dataset as part of the conversation scope so answers never reuse
+    # chat context from a different prediction file.
+    if uploaded is not None:
+        selected_dataset_signature = hashlib.sha256(uploaded.getvalue()).hexdigest()
+    elif data_source == "Current Phase 1 run":
+        selected_dataset_signature = "phase1-reference-2026-11-01"
+    else:
+        selected_dataset_signature = "upload-empty"
+
+    previous_signature = st.session_state.get("dataset_signature")
+    if previous_signature is not None and previous_signature != selected_dataset_signature:
+        save_current_conversation()
+        st.session_state["chat_history"] = []
+        st.session_state["active_conversation_id"] = uuid.uuid4().hex
+        st.session_state["recent_conversation_picker"] = None
+    st.session_state["dataset_signature"] = selected_dataset_signature
+    st.session_state.setdefault("active_conversation_id", uuid.uuid4().hex)
+
+    if data_source != "Phase 1 code + cell outputs":
+        matching_conversations = [
+            item for item in st.session_state.get("conversation_history", [])
+            if item.get("dataset_signature") == selected_dataset_signature
+        ]
+        conversation_options = [item["id"] for item in matching_conversations]
+        if st.session_state.get("recent_conversation_picker") not in conversation_options:
+            st.session_state["recent_conversation_picker"] = None
+        with recent_conversations_slot.container():
+            if conversation_options:
+                selected_conversation_id = st.selectbox(
+                    "Recent conversations",
+                    options=conversation_options,
+                    index=None,
+                    placeholder="Open a recent conversation…",
+                    format_func=lambda conversation_id: next(
+                        (item["title"] for item in matching_conversations if item["id"] == conversation_id),
+                        "Conversation",
+                    ),
+                    key="recent_conversation_picker",
+                )
+                if selected_conversation_id:
+                    selected_conversation = next(
+                        item for item in matching_conversations if item["id"] == selected_conversation_id
+                    )
+                    if selected_conversation_id != st.session_state.get("active_conversation_id"):
+                        st.session_state["active_conversation_id"] = selected_conversation_id
+                        st.session_state["chat_history"] = copy.deepcopy(selected_conversation["messages"])
+                        st.rerun()
+            else:
+                st.caption("Recent conversations will appear here.")
+            st.caption("Up to 10 conversations are kept for this app session and dataset.")
+
     allow_llm = st.toggle(
         "Enable Gemini responses", value=False,
         help="When enabled, your question, aggregate counts and retrieved project notes are sent to Google Gemini. Session rows, participant IDs and raw sensor features are excluded.",
@@ -1421,6 +1503,7 @@ if question:
         "sources": sources, "status": llm_status, "question": question,
         "plot_requested": wants_plot(question), "table_requested": wants_table(question) or wants_confusion(question),
     })
+    save_current_conversation()
 
 for i, message in enumerate(st.session_state.get("chat_history", [])):
     with st.chat_message(message["role"]):
