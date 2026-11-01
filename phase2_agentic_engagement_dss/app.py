@@ -22,10 +22,16 @@ APP_DIR = Path(__file__).parent
 KB_PATH = APP_DIR / "knowledge_base.md"
 PHASE1_REFERENCE_PATH = APP_DIR / "phase1_reference.json"
 PHASE1_PLOTS_DIR = APP_DIR / "assets" / "phase1_plots"
+PHASE1_NOTEBOOK_PREVIEW_PATH = APP_DIR / "assets" / "Phase1_Final_Four_Modality_Experiment_preview.ipynb"
 CLASSES = ["Low", "Medium", "High"]
 COLORS = {"Low": "#4C78A8", "Medium": "#F2A541", "High": "#59A14F"}
 CLASS_TO_ID = {name: i for i, name in enumerate(CLASSES)}
 ORIGINAL_TO_GROUPED = {0: "Low", 1: "Low", 2: "Medium", 3: "High", 4: "High"}
+NOTEBOOK_CELL_PLOTS = {
+    7: ["01_class_distribution.png"],
+    14: ["02_oof_confusion_matrix.png"],
+    15: ["03_metrics_and_fold_stability.png", "04_per_class_metrics.png"],
+}
 
 st.set_page_config(page_title="MultiPENG Engagement Decision Support", page_icon="🧠", layout="wide")
 
@@ -40,6 +46,75 @@ def canonical_class(value: object) -> str:
     if text in {"high", "3", "4", "class3", "class4", "high34"}:
         return "High"
     raise ValueError(f"Unknown engagement value: {value!r}. Use Low/Medium/High or numeric labels 0–4.")
+
+
+def render_phase1_notebook_preview() -> None:
+    """Show source and captured outputs from the saved Phase 1 notebook, without executing it."""
+    st.markdown("### Phase 1 notebook: code and saved outputs")
+    st.caption(
+        "Choose a notebook cell to inspect its code and recorded output. "
+        "This is the saved executed notebook; opening this view does not rerun model training. "
+        "Participant and session level prediction rows are omitted from this public preview."
+    )
+    if not PHASE1_NOTEBOOK_PREVIEW_PATH.exists():
+        st.error("The saved Phase 1 notebook preview is not available in this app build.")
+        return
+
+    notebook = json.loads(PHASE1_NOTEBOOK_PREVIEW_PATH.read_text(encoding="utf-8"))
+    code_cells = []
+    code_number = 0
+    for cell in notebook.get("cells", []):
+        if cell.get("cell_type") != "code":
+            continue
+        code_number += 1
+        source = cell.get("source", [])
+        source = "".join(source) if isinstance(source, list) else str(source)
+        first_line = next((line.strip().lstrip("# ") for line in source.splitlines() if line.strip()), "Code")
+        label = f"Cell {code_number}: {first_line[:100]}"
+        code_cells.append((label, code_number, source, cell.get("outputs", [])))
+
+    selected_label = st.selectbox(
+        "Choose a notebook cell",
+        options=[item[0] for item in code_cells],
+        index=None,
+        placeholder="Select a cell to preview…",
+        key="phase1_notebook_cell_choice",
+    )
+    if not selected_label:
+        st.info(f"The saved notebook contains {len(code_cells)} code cells. Select one above to view its code and output.")
+        return
+
+    _, code_number, source, outputs = next(item for item in code_cells if item[0] == selected_label)
+    st.code(source, language="python", line_numbers=True)
+    rendered_output = []
+    for output in outputs:
+        text = output.get("text", "")
+        if isinstance(text, list):
+            text = "".join(text)
+        if text:
+            rendered_output.append(str(text))
+        data = output.get("data", {})
+        plain = data.get("text/plain", "")
+        if isinstance(plain, list):
+            plain = "".join(plain)
+        if plain:
+            rendered_output.append(str(plain))
+        if "image/png" in data:
+            import base64
+            image_data = data["image/png"]
+            if isinstance(image_data, list):
+                image_data = "".join(image_data)
+            st.image(base64.b64decode(image_data), caption=f"Output from cell {code_number}", width="stretch")
+    if rendered_output:
+        st.markdown("**Recorded cell output**")
+        st.code("\n".join(rendered_output), language="text")
+    else:
+        st.info("This cell did not produce a text or embedded image output in the saved notebook.")
+
+    for filename in NOTEBOOK_CELL_PLOTS.get(code_number, []):
+        plot_path = PHASE1_PLOTS_DIR / filename
+        if plot_path.exists():
+            st.image(str(plot_path), caption=f"Saved plot produced by cell {code_number}", width="stretch")
 
 
 def load_prediction_csv(file) -> pd.DataFrame:
@@ -927,13 +1002,19 @@ with st.sidebar:
         st.rerun()
     st.divider()
     st.markdown("**Workspace data**")
-    data_source = st.radio("Choose the results to analyze", ["Current Phase 1 run", "Upload another Phase 1 CSV"], index=0)
+    data_source = st.radio(
+        "Choose a workspace",
+        ["Current Phase 1 run", "Upload another Phase 1 CSV", "Phase 1 code + cell outputs"],
+        index=0,
+    )
     uploaded = None
     if data_source == "Upload another Phase 1 CSV":
         uploaded = st.file_uploader("Phase 1 prediction file", type=["csv"], help="Upload session-level predictions only. Do not upload raw EEG, face, eye, or HR recordings to this public app.")
         st.caption("Uploaded files stay in this app session and are not saved to the repository.")
-    else:
+    elif data_source == "Current Phase 1 run":
         st.caption("Loaded from the current Phase 1 run as aggregate class-pair counts. No participant or session identifiers are stored in this app.")
+    else:
+        st.caption("Browse the saved Phase 1 notebook code and recorded cell outputs.")
     allow_llm = st.toggle(
         "Enable Gemini responses", value=False,
         help="When enabled, your question, aggregate counts and retrieved project notes are sent to Google Gemini. Session rows, participant IDs and raw sensor features are excluded.",
@@ -948,6 +1029,10 @@ with st.sidebar:
         st.caption("Gemini is ready. Only your question, aggregate metrics, and retrieved project notes are sent; raw rows and IDs are excluded.")
     else:
         st.caption("Local analysis and retrieval are active. Gemini is off.")
+
+if data_source == "Phase 1 code + cell outputs":
+    render_phase1_notebook_preview()
+    st.stop()
 
 try:
     if uploaded is not None:
