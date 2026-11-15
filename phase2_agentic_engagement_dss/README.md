@@ -9,6 +9,25 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
+## Standalone public web application
+
+This project also includes a separate FastAPI web application in `webapp/`. It has no login page and is designed to be publicly accessible when deployed. The app carries over the Phase 1 results dashboard, manually selected saved plots, CSV analysis, the RAG-backed research assistant, the saved notebook code/output viewer, and a nested participant-grouped Phase 1 run using the four prepared modality CSVs.
+
+Run the web version locally:
+
+```bash
+pip install -r requirements-web.txt
+uvicorn webapp.server:app --host 127.0.0.1 --port 8000
+```
+
+The repository root contains `render.yaml` for a Render web service. Deploy that Blueprint from the GitHub repository; Render will use `phase2_agentic_engagement_dss` as the service root. The web page itself has no authentication. Add `GEMINI_API_KEY` as a Render secret only if you want Gemini explanations; the local calculations and retrieved project notes work without it. The public service limits Gemini to 30 calls per running instance per hour and allows only one Phase 1 training run at a time to control shared compute and API use.
+
+### Web application data handling
+
+Uploaded prediction CSVs and the four prepared modality CSVs are processed in server memory. Uploaded files are not written to disk or stored in a database. Temporary session summaries and completed run outputs are cleared after 30 minutes or when the service restarts. The app limits CSV size, rows, and columns to protect the public service. A downloaded Phase 1 prediction file can contain participant and session identifiers from the uploaded source; upload only appropriately de-identified project data. If Gemini is enabled, the user's question, summary metrics, and retrieved project notes may be sent to Google; raw sensor rows and identifiers are not included in that prompt.
+
+Render's free service may pause while idle, so the first visit after inactivity can take longer. The Streamlit version remains available as a separate interface.
+
 The app opens on the current Phase 1 run. It loads a privacy-safe aggregate confusion-count file and the four exact plots saved from Phase 1, so you can ask questions without uploading the prepared sensor CSVs or the session-level prediction file. The current aggregate file contains nine actual/predicted class pairs and their counts; it contains no participant or session identifiers. You can switch to **Upload another Phase 1 CSV** for a different session-level prediction file. That file needs a `predicted_engagement` column; actual labels are needed for model evaluation.
 
 For evaluation, include both predictions and actual labels. The Phase 1 export columns `actual_engagement_grouped_0_2` and `actual_engagement_original_0_4` are recognized. The grouped label is used for evaluation (0/1/2 = Low/Medium/High); the original 0–4 label is mapped with 0/1 = Low, 2 = Medium, and 3/4 = High. The app reports accuracy, Macro-F1, Weighted-F1, balanced accuracy, MCC, per-class scores, and a confusion matrix. If actual labels are absent, it will not claim to know model accuracy.

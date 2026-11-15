@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Public multimodal engagement analytics and research decision support for the MultiPENG project.">
+  <title>MultiPENG | Engagement Research Assistant</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@15.0.7/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">M</span><div><b>MultiPENG</b><small>Engagement Research Assistant</small></div></div>
+      <button id="new-chat" class="new-chat">＋ New conversation</button>
+      <label class="field-label" for="history">Recent conversations</label>
+      <select id="history" class="history-select"><option value="">No conversations yet</option></select>
+      <nav class="nav" aria-label="Main navigation">
+        <button class="nav-link active" data-page="overview"><span>◫</span> Overview</button>
+        <button class="nav-link" data-page="assistant"><span>◉</span> Ask the DSS</button>
+        <button class="nav-link" data-page="csv"><span>⇧</span> Analyze a Phase 1 CSV</button>
+        <button class="nav-link" data-page="run"><span>▶</span> Run Phase 1</button>
+        <button class="nav-link" data-page="notebook"><span>⌘</span> Code and cell outputs</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <label class="toggle-row"><input id="use-gemini" type="checkbox"><span class="toggle"></span><span>Gemini explanations</span></label>
+        <p id="llm-note" class="muted small">Local calculations and project-note retrieval are active.</p>
+        <div class="privacy-note">Public research tool<br>Uploaded files stay temporarily in memory and expire.</div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar"><div><span class="crumb">MULTIMODAL ENGAGEMENT ANALYTICS</span><h1 id="page-title">Phase 1 results at a glance</h1></div><div class="status-chip"><i></i> Research workspace</div></header>
+
+      <section id="page-overview" class="page active">
+        <div class="hero"><div><div class="eyebrow">PHASE 1 → PHASE 2</div><h2>Understand engagement.<br>Explore the evidence.</h2><p>Review participant-grouped model results, inspect the saved plots, or ask questions about the project evidence.</p><button class="primary" data-go="assistant">Ask about this run <span>→</span></button></div><div class="hero-orbit"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="orbit-center">EEG<br>Eye · Face · HR</div><span class="orbit-dot dot-a"></span><span class="orbit-dot dot-b"></span><span class="orbit-dot dot-c"></span></div></div>
+        <div class="metric-grid" id="metrics"></div>
+        <div class="grid-two">
+          <article class="card"><div class="card-head"><div><div class="eyebrow">SAVED PHASE 1 EVIDENCE</div><h3>Model results</h3></div><span class="tag">Grouped OOF validation</span></div><div id="result-summary" class="body-copy"></div><div class="baseline-box" id="baseline-note"></div></article>
+          <article class="card"><div class="card-head"><div><div class="eyebrow">MODEL SELECTION</div><h3>What the run compared</h3></div></div><div id="model-list" class="model-list"></div></article>
+        </div>
+        <article class="card plot-card"><div class="card-head"><div><div class="eyebrow">PHASE 1 FIGURES</div><h3>Open a saved plot</h3></div><span class="muted">Plots are loaded only when selected</span></div><div class="plot-controls"><select id="saved-plot" class="input"><option value="">Choose a plot…</option><option value="01_class_distribution.png">Class distribution</option><option value="02_oof_confusion_matrix.png">OOF confusion matrix</option><option value="03_metrics_and_fold_stability.png">Metrics and fold stability</option><option value="04_per_class_metrics.png">Per-class precision, recall and F1</option></select></div><div id="plot-preview" class="plot-preview empty-state">Choose a plot to preview it.</div></article>
+        <div class="notice"><b>How to read these results</b><span>All 873 sessions received an out-of-fold prediction through nested participant-grouped validation. This is cross-validation evidence, not a separate locked test set. Low and Medium recall are key limitations.</span></div>
+      </section>
+
+      <section id="page-assistant" class="page">
+        <div class="assistant-intro"><div class="eyebrow">EVIDENCE-BASED QUESTION ANSWERING</div><h2>What would you like to understand?</h2><p>The assistant calculates metrics from the current file and retrieves related notes from the project knowledge base.</p></div>
+        <div id="suggestions" class="suggestions"><button>Summarize the engagement distribution.</button><button>What did the model comparison show?</button><button>Show the confusion matrix and explain common errors.</button><button>Which columns are present in my uploaded file?</button></div>
+        <div id="chat-messages" class="chat-messages"><div class="welcome-card"><div class="welcome-icon">✦</div><h3>Ask a project question</h3><p>Try a question about the data, class balance, validation, model performance, or the project method.</p></div></div>
+        <form id="chat-form" class="chat-composer"><textarea id="question" rows="1" maxlength="2000" placeholder="Message the MultiPENG research assistant…" required></textarea><button aria-label="Send question" class="send-button">↑</button></form>
+        <p class="composer-footnote">Answers use calculated file summaries and retrieved project notes. Gemini is optional; raw uploads and identifiers are not sent to it.</p>
+      </section>
+
+      <section id="page-csv" class="page">
+        <div class="section-intro"><div class="eyebrow">PHASE 1 OUTPUT INPUT</div><h2>Analyze prediction results</h2><p>Upload the session-level CSV exported by Phase 1. Include actual labels if you want the app to calculate accuracy and F1 scores.</p></div>
+        <article class="card upload-card"><div class="upload-icon">⇧</div><h3>Choose a Phase 1 prediction CSV</h3><p>Expected prediction field: <code>predicted_engagement</code>. Supported actual-label fields include <code>actual_engagement_grouped_0_2</code> and <code>actual_engagement_original_0_4</code>.</p><label class="file-button">Choose CSV<input id="prediction-file" type="file" accept=".csv,text/csv" hidden></label><span id="upload-status" class="muted"></span><div class="privacy-line">Maximum 20 MB · data is kept in temporary server memory for 30 minutes · files are not stored in the repository</div></article>
+        <div id="csv-analysis" class="hidden"></div>
+      </section>
+
+      <section id="page-run" class="page">
+        <div class="section-intro"><div class="eyebrow">TRAINING AND VALIDATION</div><h2>Run a four-modality experiment</h2><p>Upload the prepared EEG, Eye, Face, and HR tables. The server checks the session keys, aligns labels, runs nested participant-grouped model selection, and returns out-of-fold results.</p></div>
+        <div class="warning-box"><b>Before you upload</b><span>Only use prepared feature tables with <code>participant_id</code>, <code>submission_id</code>, and <code>engagement</code>. Do not upload raw identifiable recordings. Data is processed in memory and deleted after the temporary session expires.</span></div>
+        <form id="phase1-form" class="modality-grid">
+          <label class="modality-upload"><span class="modality-icon">EEG</span><b>EEG features</b><small>Prepared EEG CSV</small><input type="file" name="eeg" accept=".csv" required></label>
+          <label class="modality-upload"><span class="modality-icon">EYE</span><b>Eye tracking</b><small>Prepared Eye CSV</small><input type="file" name="eye" accept=".csv" required></label>
+          <label class="modality-upload"><span class="modality-icon">FACE</span><b>Facial behavior</b><small>Prepared Face CSV</small><input type="file" name="face" accept=".csv" required></label>
+          <label class="modality-upload"><span class="modality-icon">HR</span><b>Heart rate</b><small>Prepared HR CSV</small><input type="file" name="hr" accept=".csv" required></label>
+          <button class="primary run-button" type="submit">Start grouped Phase 1 run <span>→</span></button>
+        </form>
+        <div id="run-progress" class="hidden card"></div><div id="run-results" class="hidden"></div>
+      </section>
+
+      <section id="page-notebook" class="page">
+        <div class="section-intro"><div class="eyebrow">REPRODUCIBILITY WALKTHROUGH</div><h2>Phase 1 code and recorded outputs</h2><p>Inspect the saved executed notebook one cell at a time. This view shows recorded outputs and does not rerun the notebook.</p></div>
+        <article class="card"><label for="notebook-cell" class="field-label">Select a notebook cell</label><select id="notebook-cell" class="input"><option value="">Loading cells…</option></select><div id="cell-view" class="cell-view empty-state">Select a cell to view its code and captured output.</div></article>
+      </section>
+
+      <footer class="footer"><span>MultiPENG · Engagement research assistant</span><span>Research decision support only · Predictions can be wrong · Not for clinical or high-impact decisions</span></footer>
+    </main>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

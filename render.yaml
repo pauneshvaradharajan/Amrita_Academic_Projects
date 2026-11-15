@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: multipeng-engagement-research-assistant
+    runtime: python
+    plan: free
+    rootDir: phase2_agentic_engagement_dss
+    buildCommand: pip install -r requirements-web.txt
+    startCommand: uvicorn webapp.server:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
