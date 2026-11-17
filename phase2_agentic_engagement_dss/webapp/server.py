@@ -176,13 +176,35 @@ def summarize(frame: pd.DataFrame) -> dict[str, Any]:
 
 
 def deterministic_answer(question: str, summary: dict[str, Any] | None, sources: list[dict[str, Any]]) -> tuple[str, list[str]]:
-    q = question.lower()
+    q = re.sub(r"\s+", " ", question.lower()).strip()
     tools: list[str] = []
+    # Keep the latest user question separate from any older chat context.  These
+    # routes are intentionally tool-first; retrieved prose supports the answer
+    # but is never dumped as a substitute for answering the question.
     if not summary:
         summary = {"rows": REFERENCE["sessions"], "participants": REFERENCE["participants"],
                    "class_counts": {"Low": 97, "Medium": 156, "High": 620}}
         tools.append("saved Phase 1 aggregate results")
-    if any(k in q for k in ["column", "schema", "field", "feature"]):
+
+    if any(k in q for k in ["why did i build", "why did i create", "why build", "why create", "project purpose", "purpose of this project", "what is this project", "what are you", "who are you", "what is your purpose", "what is the aim"]):
+        answer = ("You built this project to estimate a game player's engagement from four synchronized signals—EEG, eye tracking, facial behavior, and heart rate—and make the results easier for researchers to inspect. "
+                  "Phase 1 produces the engagement predictions and evaluation evidence. Phase 2 brings those saved results into a research assistant that calculates supported statistics, retrieves project notes, and explains the evidence in plain language. "
+                  "It is a research decision-support tool; it does not read a player's mind or make clinical conclusions.")
+        tools.append("project-purpose notes")
+    elif any(k in q for k in ["dataset", "data set", "multipeng", "participants", "sessions", "modalit", "what data"]):
+        uploaded_columns = summary.get("columns", []) if isinstance(summary, dict) else []
+        uploaded = bool(uploaded_columns)
+        if uploaded:
+            answer = (f"The currently uploaded file has **{summary['rows']:,} rows** and **{len(uploaded_columns)} columns**. It includes: "
+                      + ", ".join(f"`{column}`" for column in uploaded_columns) + ".\n\n")
+        else:
+            answer = "The project uses MultiPENG gameplay-session data with four synchronized modalities: EEG (brain-signal features), eye tracking (gaze and ocular behavior), facial behavior/OpenFace (facial and head features), and heart rate. The engagement target is grouped into **Low, Medium, and High** for the current Phase 1 evaluation.\n\n"
+        answer += ("The project abstract describes the original dataset as **900 gameplay sessions from 39 participants**. "
+                   f"The prepared Phase 1 evaluation currently stored in this DSS contains **{REFERENCE['sessions']:,} sessions from {REFERENCE['participants']} participants**. "
+                   "These counts describe different scopes: the prepared evaluation has fewer usable, aligned sessions than the original dataset. "
+                   "Upload a prediction CSV to see its exact columns and file-specific quality checks.")
+        tools.append("dataset facts and uploaded-file schema" if uploaded else "project dataset notes and saved Phase 1 scope")
+    elif any(k in q for k in ["column", "schema", "field", "feature"]):
         cols = summary.get("columns", ["actual_engagement", "predicted_engagement", "session_count"])
         answer = "The available columns are:\n\n" + "\n".join(f"- `{c}`" for c in cols)
         tools.append("CSV schema")
@@ -216,12 +238,41 @@ def deterministic_answer(question: str, summary: dict[str, Any] | None, sources:
         answer = f"The uploaded file has **{summary['rows']:,} rows**, **{summary['missing_cells']:,} missing cells**, and **{summary['duplicate_rows']:,} completely duplicated rows**. Session uniqueness is checked only when the file includes a session identifier."
         tools.append("CSV quality checks")
     else:
-        if sources:
-            answer = "Here is the project evidence that best matches your question:\n\n" + "\n\n".join(f"**{item['title']}**\n{item['text']}" for item in sources[:2])
+        # Use RAG as supporting material: extract a few relevant, readable
+        # sentences rather than pasting a full knowledge-base section.
+        relevant = [source for source in sources if float(source.get("score", 0)) >= 0.04]
+        if relevant:
+            answer = _grounded_excerpt(question, relevant)
             tools.append("local RAG retrieval from knowledge_base.md")
         else:
-            answer = "I could not find enough project evidence to answer that reliably. Try asking about the dataset columns, class distribution, model metrics, confusion matrix, validation method, or preprocessing."
+            answer = ("I can help with the MultiPENG dataset, saved Phase 1 results, validation, class balance, preprocessing, model choices, or how the DSS uses RAG and Gemini. "
+                      "I could not find enough project evidence for this particular question, so I will not guess. Try naming the topic or upload the relevant Phase 1 prediction CSV.")
     return answer, tools
+
+
+def _grounded_excerpt(question: str, sources: list[dict[str, Any]]) -> str:
+    """Return a concise evidence-led response instead of raw retrieved chunks."""
+    query_terms = {term for term in re.findall(r"[a-z0-9]+", question.lower()) if len(term) > 2}
+    candidates: list[tuple[float, str]] = []
+    for source in sources[:3]:
+        for sentence in re.split(r"(?<=[.!?])\s+|\n+", source.get("text", "")):
+            sentence = sentence.strip(" #-\t")
+            if len(sentence) < 35:
+                continue
+            terms = {term for term in re.findall(r"[a-z0-9]+", sentence.lower()) if len(term) > 2}
+            overlap = len(query_terms & terms) / max(len(query_terms), 1)
+            score = overlap + float(source.get("score", 0))
+            candidates.append((score, sentence))
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    selected: list[str] = []
+    for _, sentence in candidates:
+        if sentence not in selected:
+            selected.append(sentence)
+        if len(selected) == 4:
+            break
+    if not selected:
+        return "I found a related project note, but it does not contain enough detail to answer this confidently. Please narrow the question to a specific project topic."
+    return "Based on the project notes:\n\n" + "\n\n".join(f"- {sentence}" for sentence in selected)
 
 
 def gemini_answer(question: str, summary: dict[str, Any] | None, sources: list[dict[str, Any]], history: list[dict[str, str]]) -> tuple[str | None, str]:
@@ -240,9 +291,12 @@ def gemini_answer(question: str, summary: dict[str, Any] | None, sources: list[d
                    "retrieved_project_notes": [item["text"] for item in sources]}
         recent = "\n".join(f"{m.get('role','user')}: {str(m.get('content',''))[:700]}" for m in history[-6:])
         prompt = ("You are a careful research decision-support assistant for a multimodal engagement project. "
+                  "Answer the user's exact latest question directly in the first sentence. Do not substitute a retrieved passage for an answer, and do not paste long source text. "
+                  "Use simple language and provide enough detail to satisfy the requested format (including every requested list item or line). "
                   "Answer from the supplied computed results and retrieved project notes only. Do not invent results. "
                   "If evidence is missing, say so. Distinguish predictions from ground truth and grouped OOF results from a locked test. "
-                  "Format requested lists, tables, or line counts in Markdown. Explain simply.\n\n"
+                  "Format requested lists, tables, or line counts in Markdown. If the user asks about the dataset, explain the four modalities and distinguish original dataset size from prepared Phase 1 evaluation size. "
+                  "Use the previous conversation only to resolve references such as 'that' or 'tell me more'; otherwise prioritize the latest question.\n\n"
                   f"Evidence JSON:\n{json.dumps(context, default=str)[:18_000]}\n\n"
                   f"Recent conversation:\n{recent}\n\nQuestion: {question}")
         response = client.models.generate_content(model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"), contents=prompt)
