@@ -234,7 +234,7 @@ def deterministic_answer(question: str, summary: dict[str, Any] | None, sources:
             answer += " Uploaded columns: " + ", ".join(f"`{c}`" for c in summary.get("columns", [])) + "."
         tools.append("dataset notes and saved Phase 1 scope")
 
-    elif has("where stored", "where is it stored", "where are results", "where are my saved results", "where are files", "where saved", "where is the data", "storage", "database"):
+    elif has("where stored", "where is it stored", "where is that file", "where is this file", "where is that stored", "where are results", "where are my saved results", "where are files", "where saved", "where is the data", "storage", "database"):
         if has("knowledge", "rag", "vector", "retrieval"):
             answer = ("The RAG knowledge source is `phase2_agentic_engagement_dss/knowledge_base.md` in the GitHub repository. The app reads this file locally and uses TF-IDF to retrieve relevant passages; it does **not** use a separate vector database. "
                       "The saved Phase 1 summary is in `phase2_agentic_engagement_dss/phase1_reference.json`, with figures in `phase2_agentic_engagement_dss/assets/phase1_plots/`. "
@@ -359,7 +359,12 @@ def deterministic_answer(question: str, summary: dict[str, Any] | None, sources:
         tools.append("DSS capability and limitation notes")
 
     else:
-        relevant = [source for source in sources if float(source.get("score", 0)) >= 0.04]
+        # Do not surface a loosely matching passage as though it answered the question.
+        # RAG evidence is useful only when both relevance and lexical overlap are clear.
+        query_terms = {term for term in re.findall(r"[a-z0-9_]+", q) if len(term) > 3}
+        relevant = [source for source in sources
+                    if float(source.get("score", 0)) >= 0.12
+                    and query_terms.intersection(set(re.findall(r"[a-z0-9_]+", str(source.get("text", "")).lower())))]
         if relevant:
             answer = _grounded_excerpt(question, relevant)
             tools.append("local RAG retrieval from knowledge_base.md")
@@ -398,8 +403,13 @@ def resolve_follow_up(question: str, history: list[dict[str, str]]) -> str:
     """Add the last user topic only when the new prompt clearly depends on it."""
     q = question.strip()
     normalized = q.lower().strip(" .?!")
+    words = normalized.split()
     follow_up = (normalized in {"why", "how", "what about that", "what about it", "tell me more", "explain more", "more details", "continue"}
-                 or any(normalized.startswith(prefix) for prefix in ("explain that", "tell me more about it", "what does that", "how does that", "why is that")))
+                 or any(normalized.startswith(prefix) for prefix in (
+                     "explain that", "tell me more about it", "what does that", "how does that", "why is that",
+                     "where is that", "where is this", "what is that", "what was that", "show that", "list those",
+                 ))
+                 or (len(words) <= 7 and any(term in words for term in ("that", "this", "it", "those", "there"))))
     if not follow_up:
         return q
     previous_users = [str(item.get("content", "")).strip() for item in history
