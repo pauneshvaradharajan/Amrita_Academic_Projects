@@ -41,7 +41,6 @@ function renderMessages(){const box=$('#chat-messages');if(!state.messages.lengt
 }
 $('#suggestions').addEventListener('click',e=>{const button=e.target.closest('button');if(button){$('#question').value=button.textContent;sendQuestion();}});
 $('#chat-form').addEventListener('submit',e=>{e.preventDefault();sendQuestion();});
-$('#question').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();if(!state.busy)sendQuestion();}});
 async function sendQuestion(){const input=$('#question');const question=input.value.trim();if(!question||state.busy)return;state.busy=true;input.value="";$('#suggestions').classList.add('hidden');appendMessage('user',question);const waiting={role:'assistant',content:'I’m checking the results and project notes…'};state.messages.push(waiting);renderMessages();try{const result=await api('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question,dataset_id:state.datasetId,use_gemini:$('#use-gemini').checked,history:state.messages.slice(-8).map(m=>({role:m.role,content:m.content}))})});state.messages.pop();appendMessage('assistant',result.answer,result);saveHistory();}catch(error){state.messages.pop();appendMessage('assistant',`I could not complete that request: ${error.message}`); }finally{state.busy=false;}}
 $('#use-gemini').addEventListener('change',e=>{$('#llm-note').textContent=e.target.checked?'Gemini will receive your question, aggregate summaries, and retrieved notes only.':'Local calculations and project-note retrieval are active.';});
 
