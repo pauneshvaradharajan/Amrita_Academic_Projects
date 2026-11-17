@@ -25,7 +25,7 @@
         <button class="nav-link" data-page="notebook"><span>⌘</span> Code and cell outputs</button>
       </nav>
       <div class="sidebar-bottom">
-        <label class="toggle-row"><input id="use-gemini" type="checkbox"><span class="toggle"></span><span>Gemini explanations</span></label>
+        <label class="toggle-row"><input id="use-gemini" type="checkbox"><span class="toggle"></span><span id="llm-toggle-label">Gemini explanations</span></label>
         <p id="llm-note" class="muted small">Local calculations and project-note retrieval are active.</p>
         <div class="privacy-note">Public research tool<br>Uploaded files stay temporarily in memory and expire.</div>
       </div>
@@ -47,10 +47,10 @@
 
       <section id="page-assistant" class="page">
         <div class="assistant-intro"><div class="eyebrow">EVIDENCE-BASED QUESTION ANSWERING</div><h2>What would you like to understand?</h2><p>The assistant calculates metrics from the current file and retrieves related notes from the project knowledge base.</p></div>
-        <div id="suggestions" class="suggestions"><button>Summarize the engagement distribution.</button><button>What did the model comparison show?</button><button>Show the confusion matrix and explain common errors.</button><button>Which columns are present in my uploaded file?</button></div>
+        <div id="suggestions" class="suggestions"><button>Why did I build this DSS?</button><button>What dataset and modalities does this project use?</button><button>Explain the participant-grouped folds simply.</button><button>How did Phase 1 handle class imbalance?</button><button>Show the confusion matrix and biggest error.</button><button>What do RAG and Gemini each do here?</button><button>What are the Phase 1 results and their limitation?</button><button>What can the DSS verify, and what can it not verify?</button></div>
         <div id="chat-messages" class="chat-messages"><div class="welcome-card"><div class="welcome-icon">✦</div><h3>Ask a project question</h3><p>Try a question about the data, class balance, validation, model performance, or the project method.</p></div></div>
         <form id="chat-form" class="chat-composer"><textarea id="question" rows="1" maxlength="2000" placeholder="Message the MultiPENG research assistant…" required></textarea><button aria-label="Send question" class="send-button">↑</button></form>
-        <p class="composer-footnote">Answers use calculated file summaries and retrieved project notes. Gemini is optional; raw uploads and identifiers are not sent to it.</p>
+        <p class="composer-footnote">New questions use the current answer engine. Past conversations are saved snapshots; choose <b>New conversation</b> to ask again. Gemini is optional; raw uploads and identifiers are not sent to it.</p>
       </section>
 
       <section id="page-csv" class="page">
